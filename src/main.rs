@@ -40,7 +40,46 @@ fn entry() -> Result<(), SelError> {
             Ok(())
         }
         Cli::File(script_path) => run_file(&script_path, env.clone()),
+        Cli::Lint(script_path) => lint_file(&script_path),
+        Cli::Eval(expr) => eval_expr(&expr, env.clone()),
         Cli::Repl => repl("sel> ", env),
+    }
+}
+
+fn lint_file(script_path: &str) -> Result<(), SelError> {
+    let src = read_script(script_path)?;
+    let mut diags = Vec::new();
+    let file_id = intern(script_path);
+    _ = parse_all(&src, file_id, &mut diags);
+    if diags.is_empty() {
+        println!("No syntax or lint errors found in `{script_path}`.");
+        Ok(())
+    } else {
+        for diag in diags {
+            eprintln!("{diag}");
+        }
+        Err(SelError::Trace("lint failed".into()))
+    }
+}
+
+fn eval_expr(expr: &str, env: Rc<RefCell<Env>>) -> Result<(), SelError> {
+    let mut diags = Vec::new();
+    let file_id = intern("<eval>");
+    let asts = parse_all(expr, file_id, &mut diags);
+    if !diags.is_empty() {
+        for diag in diags {
+            eprintln!("{diag}");
+        }
+        return Err(SelError::Trace("invalid syntax".into()));
+    }
+    match execute_asts(asts, env) {
+        Ok(val) => {
+            if !matches!(val, Value::Nil) {
+                println!("{val}");
+            }
+            Ok(())
+        }
+        Err(e) => Err(e),
     }
 }
 
@@ -414,24 +453,16 @@ fn run_file(script_path: &str, env: Rc<RefCell<Env>>) -> Result<(), SelError> {
 
 #[cfg(test)]
 mod tests {
-    use std::fs::read_dir;
-
     use super::*;
 
     fn test_folder_impl(dir: &str) -> Result<(), ()> {
-        let tests_dir = read_dir(dir)
-            .map_err(|e| eprintln!("Error: cannot read directory tests because {e}"))?;
-        for res_entry in tests_dir {
-            let entry = res_entry
-                .map_err(|e| eprintln!("Error: cannot read directory tests because {e}"))?;
-            if entry
-                .file_type()
-                .map_err(|e| eprintln!("Error: cannot get type of file because {e}"))?
-                .is_file()
-                && entry.path().extension().is_some_and(|ext| ext == "scm")
-            {
+        let entries = sel::os::read_dir(std::path::Path::new(dir))
+            .map_err(|e| eprintln!("Error: cannot read directory {dir} because {e}"))?;
+        for name in entries {
+            let p = std::path::Path::new(dir).join(&name);
+            if sel::os::is_file(&p) && p.extension().is_some_and(|ext| ext == "scm") {
                 #[cfg(not(feature = "ffi"))]
-                let path_str = entry.path().to_string_lossy().to_string();
+                let path_str = p.to_string_lossy().to_string();
                 #[cfg(not(feature = "ffi"))]
                 if path_str.contains("ffi") {
                     println!(
@@ -442,9 +473,8 @@ mod tests {
                 }
                 let env = Rc::new(RefCell::new(Env::default()));
                 env.borrow_mut().parent = Some(load_core_lib());
-                println!("TEST: {}", entry.path().display());
-                run_file(entry.path().to_string_lossy().as_ref(), env)
-                    .map_err(|e| eprintln!("{e}"))?;
+                println!("TEST: {}", p.display());
+                run_file(p.to_string_lossy().as_ref(), env).map_err(|e| eprintln!("{e}"))?;
             }
         }
         Ok(())

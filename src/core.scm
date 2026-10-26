@@ -333,9 +333,9 @@
 (define tau 6.283185307179586)
 (define e 2.718281828459045)
 
-;; Filesystem Conveniences
-(define (fs-exists? path) (file-system 'exists? path))
-(define (fs-read path) (file-system 'read path))
-(define (fs-write path content) (file-system 'write path content))
-(define (fs-list path) (file-system 'list path))
-(define (fs-delete path) (file-system 'delete path))
+;; Filesystem Conveniences (Unified System Interface)
+(define (fs-exists? path) (system 'exists? path))
+(define (fs-read path) (system 'read path))
+(define (fs-write path content) (system 'write path content))
+(define (fs-list path) (system 'list path))
+(define (fs-delete path) (system 'delete path))

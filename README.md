@@ -10,6 +10,7 @@
 - **First-Class Functions & TCO**: Full first-class function support with tail call optimization for infinite recursion without stack overflows.
 - **True Metaprogramming**: A macro system (`defmacro`) with quasiquotation (`` ` ``), unquote (`~`), and unquote-splicing (`~@`).
 - **Modern Primitives**: Native support for **curly-brace record structures** (`{key value}`), multi-base numbers (`0xFF`, `0b1010`, `0o755`), thread-first pipelines (`->`), and native coroutines.
+- **Unified OS & Filesystem Interface**: All OS primitives, environment variables, time, and filesystem I/O are unified into a single interface (`system` / `sel::os::Os`) with built-in sandbox security.
 - **Dynamic FFI**: Zero-boilerplate runtime integration with standard C shared libraries using `libffi`.
 
 ---
@@ -34,6 +35,16 @@ Or start the interactive REPL:
 sel
 ```
 
+Evaluate an expression directly:
+```bash
+sel -e "(+ 10 20 30)"
+```
+
+Lint and check a script file for syntax errors without executing:
+```bash
+sel --lint examples/hello.scm
+```
+
 ---
 
 ## Language Showcase
@@ -53,6 +64,11 @@ sel
 ;; Sleek record data structures
 (define person {name "Marcos" age 30})
 (print (rget person 'name)) ; "Marcos"
+
+;; Unified OS interface
+(system 'write "test.txt" "Hello from sel!")
+(println (system 'read "test.txt"))
+(system 'delete "test.txt")
 ```
 
 ---

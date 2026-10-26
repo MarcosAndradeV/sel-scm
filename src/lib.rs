@@ -4,6 +4,7 @@ pub mod debugger;
 pub mod diagnostics;
 pub mod internal;
 pub mod lexer;
+pub mod os;
 pub mod parser;
 pub mod runtime;
 pub mod types;
@@ -15,6 +16,7 @@ pub use diagnostics::SelError;
 pub use diagnostics::SelErrorKind;
 pub use internal::load_core_lib;
 pub use lexer::Loc;
+pub use os::{Os, RealOs, SandboxedOs};
 pub use runtime::Env;
 pub use types::{intern, lookup};
 pub use value::Value;
@@ -35,6 +37,11 @@ pub fn eval_sandboxed(
     env: Rc<RefCell<Env>>,
     sandbox_root: Option<PathBuf>,
 ) -> std::result::Result<Value, SelError> {
+    let _guard = if let Some(ref root) = sandbox_root {
+        Some(os::set_sandbox(root.clone())?)
+    } else {
+        None
+    };
     let mut diags = Vec::new();
     let file_id = types::intern("<embedded>");
     let asts = parser::parse_all(source, file_id, &mut diags);
@@ -56,30 +63,12 @@ pub fn load_file_sandboxed(
     sandbox_root: Option<PathBuf>,
 ) -> Result<Value, SelError> {
     let target_path = PathBuf::from(script_path);
-    if let Some(ref root) = sandbox_root {
-        let canonical_path = target_path.canonicalize().map_err(|e| {
-            SelError::SandboxViolation(
-                Loc::default(),
-                format!("Failed to resolve path {}: {}", target_path.display(), e),
-            )
-        })?;
-        let canonical_root = root.canonicalize().map_err(|e| {
-            SelError::SandboxViolation(
-                Loc::default(),
-                format!("Failed to resolve sandbox root {}: {}", root.display(), e),
-            )
-        })?;
-        if !canonical_path.starts_with(&canonical_root) {
-            return Err(SelError::SandboxViolation(
-                Loc::default(),
-                format!(
-                    "Sandbox violation: path {} is outside root {}",
-                    canonical_path.display(),
-                    canonical_root.display()
-                ),
-            ));
-        }
-    }
+    let _guard = if let Some(ref root) = sandbox_root {
+        os::check_path_sandbox(&target_path, root, Loc::default())?;
+        Some(os::set_sandbox(root.clone())?)
+    } else {
+        None
+    };
     let src = internal::read_script(script_path)?;
     let mut diags = Vec::new();
     let file_id = intern(script_path);
@@ -250,5 +239,106 @@ mod tests {
 
         let cons_str = eval("(cons #\\h \"ello\")", env).unwrap();
         assert_eq!(format!("{cons_str}"), "hello");
+    }
+
+    #[test]
+    fn test_record_order_independent_equality() {
+        let env = Rc::new(RefCell::new(Env::default()));
+        env.borrow_mut().parent = Some(load_core_lib());
+
+        let res = eval("(eq? {a 1 b 2} {b 2 a 1})", env.clone()).unwrap();
+        assert!(matches!(res, Value::Boolean(true)));
+
+        let res_diff = eval("(eq? {a 1 b 2} {a 1 b 3})", env.clone()).unwrap();
+        assert!(matches!(res_diff, Value::Boolean(false)));
+
+        let res_diff_keys = eval("(eq? {a 1 b 2} {a 1 c 2})", env).unwrap();
+        assert!(matches!(res_diff_keys, Value::Boolean(false)));
+    }
+
+    #[test]
+    fn test_modulo_division_by_zero_and_overflow() {
+        let env = Rc::new(RefCell::new(Env::default()));
+        env.borrow_mut().parent = Some(load_core_lib());
+
+        let res_zero = eval("(mod 10 0)", env.clone());
+        assert!(res_zero.is_err());
+        assert!(res_zero.unwrap_err().message().contains("division by zero"));
+
+        let res_overflow = eval("(mod -9223372036854775808 -1)", env);
+        assert!(res_overflow.is_ok());
+        assert!(matches!(res_overflow.unwrap(), Value::Integer(0)));
+    }
+
+    #[test]
+    fn test_macro_arity_mismatch() {
+        let env = Rc::new(RefCell::new(Env::default()));
+        env.borrow_mut().parent = Some(load_core_lib());
+
+        eval("(defmacro test-mac (x y) (list '+ x y))", env.clone()).unwrap();
+
+        // Calling with too few args
+        let res_under = eval("(test-mac 1)", env.clone());
+        assert!(res_under.is_err());
+        assert!(matches!(
+            res_under.unwrap_err(),
+            SelError::ArityMismatch {
+                expected: 2,
+                actual: 1,
+                ..
+            }
+        ));
+
+        // Calling with too many args
+        let res_over = eval("(test-mac 1 2 3)", env);
+        assert!(res_over.is_err());
+        assert!(matches!(
+            res_over.unwrap_err(),
+            SelError::ArityMismatch {
+                expected: 2,
+                actual: 3,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn test_system_unified_interface() {
+        let env = Rc::new(RefCell::new(Env::default()));
+        env.borrow_mut().parent = Some(load_core_lib());
+
+        // Test cwd
+        let cwd_res = eval("(system 'cwd)", env.clone()).unwrap();
+        assert!(matches!(cwd_res, Value::String(_)));
+
+        // Test time
+        let time_res = eval("(system 'time)", env.clone()).unwrap();
+        assert!(matches!(time_res, Value::Integer(t) if t > 0));
+
+        // Test setenv and getenv through unified system
+        eval(
+            "(system 'setenv \"SEL_UNIFIED_TEST\" \"working\")",
+            env.clone(),
+        )
+        .unwrap();
+        let env_res = eval("(system 'getenv \"SEL_UNIFIED_TEST\")", env.clone()).unwrap();
+        assert_eq!(env_res.to_string_lossy().as_deref(), Some("working"));
+
+        // Test filesystem operations through unified system
+        let temp_file = "tests/test_unified_temp.txt";
+        eval(
+            &format!("(system 'write \"{temp_file}\" \"Unified IO\")"),
+            env.clone(),
+        )
+        .unwrap();
+        let exists = eval(&format!("(system 'exists? \"{temp_file}\")"), env.clone()).unwrap();
+        assert!(matches!(exists, Value::Boolean(true)));
+
+        let content = eval(&format!("(system 'read \"{temp_file}\")"), env.clone()).unwrap();
+        assert_eq!(content.to_string_lossy().as_deref(), Some("Unified IO"));
+
+        eval(&format!("(system 'delete \"{temp_file}\")"), env.clone()).unwrap();
+        let deleted_exists = eval(&format!("(system 'exists? \"{temp_file}\")"), env).unwrap();
+        assert!(matches!(deleted_exists, Value::Boolean(false)));
     }
 }

@@ -34,7 +34,11 @@ pub fn optimize_ast(list: Vec<Ast>, loc: Loc) -> Result<Ast> {
                 for ast in iter {
                     match ast {
                         Ast::List(loc, mut list) => {
-                            list.push(first_v);
+                            if list.is_empty() {
+                                list.push(first_v);
+                            } else {
+                                list.insert(1, first_v);
+                            }
                             first_v = optimize_ast(list, loc)?;
                         }
                         s => {

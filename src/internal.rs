@@ -62,7 +62,10 @@ pub fn sum(loc: Loc, args: Vec<Value>) -> Result<Value> {
 #[inline]
 pub fn sub_slice(loc: Loc, args: &[Value]) -> Result<Value> {
     if args.is_empty() {
-        return Err(SelError::Runtime(loc, "Expected at least 1 argument for -".into()));
+        return Err(SelError::Runtime(
+            loc,
+            "Expected at least 1 argument for -".into(),
+        ));
     }
     let mut is_float = false;
     let mut int_val = 0i64;
@@ -176,7 +179,10 @@ pub fn mul(loc: Loc, args: Vec<Value>) -> Result<Value> {
 #[inline]
 pub fn div_slice(loc: Loc, args: &[Value]) -> Result<Value> {
     if args.is_empty() {
-        return Err(SelError::Runtime(loc, "Expected at least 1 argument for /".into()));
+        return Err(SelError::Runtime(
+            loc,
+            "Expected at least 1 argument for /".into(),
+        ));
     }
     if args.len() == 1 {
         match args[0] {
@@ -242,7 +248,10 @@ pub fn modulo_slice(loc: Loc, args: &[Value]) -> Result<Value> {
             return Err(SelError::Runtime(loc, "modulo requires integer".into()));
         }
     };
-    Ok(Value::Integer(a % b))
+    if b == 0 {
+        return Err(SelError::Runtime(loc, "division by zero in modulo".into()));
+    }
+    Ok(Value::Integer(a.checked_rem(b).unwrap_or(0)))
 }
 
 #[inline]
@@ -328,8 +337,7 @@ fn is_value_equal(first: &Value, arg: &Value) -> bool {
             a.fields().len() == b.fields().len()
                 && a.fields()
                     .iter()
-                    .zip(b.fields())
-                    .all(|((ka, va), (kb, vb))| *ka == *kb && is_value_equal(va, vb))
+                    .all(|(ka, va)| b.fields().get(ka).is_some_and(|vb| is_value_equal(va, vb)))
         }
         (Value::Char(a), Value::Char(b)) => a == b,
         _ => false,
@@ -442,14 +450,15 @@ pub fn enable_output_capture() {
 
 pub fn drain_captured_output() -> Vec<String> {
     OUTPUT_SINK.with(|sink| {
-        sink.borrow_mut().as_mut().map(std::mem::take).unwrap_or_default()
+        sink.borrow_mut()
+            .as_mut()
+            .map(std::mem::take)
+            .unwrap_or_default()
     })
 }
 
 pub fn disable_output_capture() -> Vec<String> {
-    OUTPUT_SINK.with(|sink| {
-        sink.borrow_mut().take().unwrap_or_default()
-    })
+    OUTPUT_SINK.with(|sink| sink.borrow_mut().take().unwrap_or_default())
 }
 
 pub fn emit_stdout(s: &str) {
@@ -1766,43 +1775,14 @@ pub fn newline(loc: Loc, args: Vec<Value>) -> Result<Value> {
     Ok(Value::Nil)
 }
 
-pub fn file_system(loc: Loc, mut call_args: Vec<Value>) -> Result<Value> {
+pub fn file_system(loc: Loc, call_args: Vec<Value>) -> Result<Value> {
     if call_args.is_empty() {
         return Err(SelError::SyntaxError(
             loc,
             "Expected symbol for system".into(),
         ));
     }
-    let args = call_args.split_off(1);
-    if let Some(Value::Symbol(sym)) = call_args.pop() {
-        match lookup(sym).as_str() {
-            "exists?" => {
-                if args.len() != 1 {
-                    return Err(SelError::SyntaxError(
-                        loc,
-                        "Expected exactly 1 arguments for file-exists?".into(),
-                    ));
-                }
-                return if let Some(path) = args[0].to_string_lossy() {
-                    Ok(Value::Boolean(std::path::Path::new(&path).exists()))
-                } else {
-                    Err(SelError::Runtime(
-                        loc,
-                        "file-exists? requires a string argument".into(),
-                    ))
-                };
-            }
-            "write" => return fs_write(loc, &args),
-            "read" => return fs_read(loc, &args),
-            "list" => return fs_list(loc, &args),
-            "delete" => return fs_delete(loc, &args),
-            _ => {}
-        }
-    }
-    Err(SelError::SyntaxError(
-        loc,
-        "Expected symbol for system".into(),
-    ))
+    system(loc, call_args)
 }
 
 fn fs_write(loc: Loc, args: &[Value]) -> Result<Value> {
@@ -1813,7 +1793,7 @@ fn fs_write(loc: Loc, args: &[Value]) -> Result<Value> {
         ));
     }
     if let (Some(path), Some(content)) = (args[0].to_string_lossy(), args[1].to_string_lossy()) {
-        match std::fs::write(&path, &content) {
+        match crate::os::write(std::path::Path::new(&path), &content) {
             Ok(_) => Ok(Value::Nil),
             Err(e) => Err(SelError::Runtime(loc, format!("write failed: {}", e))),
         }
@@ -1829,11 +1809,11 @@ fn fs_read(loc: Loc, args: &[Value]) -> Result<Value> {
     if args.len() != 1 {
         return Err(SelError::SyntaxError(
             loc,
-            "Expected exactly 1 arguments for read".into(),
+            "Expected exactly 1 argument for read".into(),
         ));
     }
     if let Some(path) = args[0].to_string_lossy() {
-        match std::fs::read_to_string(&path) {
+        match crate::os::read_to_string(std::path::Path::new(&path)) {
             Ok(content) => Ok(Value::make_string(&content)),
             Err(e) => Err(SelError::Runtime(loc, format!("read failed: {}", e))),
         }
@@ -1853,14 +1833,12 @@ fn fs_list(loc: Loc, args: &[Value]) -> Result<Value> {
         ));
     }
     if let Some(path) = args[0].to_string_lossy() {
-        match std::fs::read_dir(&path) {
+        match crate::os::read_dir(std::path::Path::new(&path)) {
             Ok(entries) => {
-                let mut list = Vec::new();
-                for entry in entries.flatten() {
-                    if let Some(name) = entry.file_name().to_str() {
-                        list.push(Value::make_string(name));
-                    }
-                }
+                let list = entries
+                    .into_iter()
+                    .map(|name| Value::make_string(&name))
+                    .collect::<Vec<_>>();
                 Ok(Value::make_list(list))
             }
             Err(e) => Err(SelError::Runtime(loc, format!("list failed: {}", e))),
@@ -1882,19 +1860,9 @@ fn fs_delete(loc: Loc, args: &[Value]) -> Result<Value> {
     }
     if let Some(path) = args[0].to_string_lossy() {
         let p = std::path::Path::new(&path);
-        if p.is_dir() {
-            match std::fs::remove_dir_all(p) {
-                Ok(_) => Ok(Value::Nil),
-                Err(e) => Err(SelError::Runtime(
-                    loc,
-                    format!("delete directory failed: {}", e),
-                )),
-            }
-        } else {
-            match std::fs::remove_file(p) {
-                Ok(_) => Ok(Value::Nil),
-                Err(e) => Err(SelError::Runtime(loc, format!("delete file failed: {}", e))),
-            }
+        match crate::os::remove(p) {
+            Ok(_) => Ok(Value::Nil),
+            Err(e) => Err(SelError::Runtime(loc, format!("delete failed: {}", e))),
         }
     } else {
         Err(SelError::Runtime(
@@ -1921,23 +1889,24 @@ pub fn system(loc: Loc, mut system_args: Vec<Value>) -> Result<Value> {
                         "Expected exactly 0 arguments for args".into(),
                     ));
                 }
-                let args_vec = std::env::args()
+                let args_vec = crate::os::args()
+                    .into_iter()
                     .skip(1)
                     .map(|s| Value::make_string(&s))
                     .collect::<Vec<_>>();
                 return Ok(Value::make_list(args_vec));
             }
-            "getenv" => {
+            "getenv" | "get-env" => {
                 if args.len() != 1 {
                     return Err(SelError::SyntaxError(
                         loc,
-                        "Expected exactly 1 arguments for getenv".into(),
+                        "Expected exactly 1 argument for getenv".into(),
                     ));
                 }
                 return if let Some(key) = args[0].to_string_lossy() {
-                    match std::env::var(&key) {
-                        Ok(val) => Ok(Value::make_string(&val)),
-                        Err(_) => Ok(Value::Nil),
+                    match crate::os::get_env(&key) {
+                        Some(val) => Ok(Value::make_string(&val)),
+                        None => Ok(Value::Nil),
                     }
                 } else {
                     Err(SelError::Runtime(
@@ -1945,6 +1914,22 @@ pub fn system(loc: Loc, mut system_args: Vec<Value>) -> Result<Value> {
                         "getenv requires a string argument".into(),
                     ))
                 };
+            }
+            "setenv" | "set-env" | "set-env!" => {
+                if args.len() != 2 {
+                    return Err(SelError::SyntaxError(
+                        loc,
+                        "Expected exactly 2 arguments for setenv".into(),
+                    ));
+                }
+                let key = args[0]
+                    .to_string_lossy()
+                    .ok_or_else(|| SelError::Runtime(loc, "setenv requires string key".into()))?;
+                let val = args[1]
+                    .to_string_lossy()
+                    .ok_or_else(|| SelError::Runtime(loc, "setenv requires string value".into()))?;
+                crate::os::set_env(&key, &val);
+                return Ok(Value::Nil);
             }
             "exit" => {
                 if args.len() > 1 {
@@ -1957,25 +1942,89 @@ pub fn system(loc: Loc, mut system_args: Vec<Value>) -> Result<Value> {
                     Some(Value::Integer(code)) => code as _,
                     _ => 0,
                 };
-                std::process::exit(code)
+                crate::os::exit(code)
             }
             "sleep" => {
                 if args.len() != 1 {
                     return Err(SelError::SyntaxError(
                         loc,
-                        "Expected exactly 1 arguments for sleep".into(),
+                        "Expected exactly 1 argument for sleep".into(),
                     ));
                 }
                 return if let Value::Integer(d) = &args[0] {
-                    std::thread::sleep(std::time::Duration::from_secs(*d as _));
+                    if *d > 0 {
+                        crate::os::sleep(std::time::Duration::from_secs(*d as u64));
+                    }
                     Ok(Value::Nil)
                 } else {
                     Err(SelError::Runtime(
                         loc,
-                        "getenv requires a string argument".into(),
+                        "sleep requires an integer argument".into(),
                     ))
                 };
             }
+            "sleep-ms" => {
+                if args.len() != 1 {
+                    return Err(SelError::SyntaxError(
+                        loc,
+                        "Expected exactly 1 argument for sleep-ms".into(),
+                    ));
+                }
+                return if let Value::Integer(d) = &args[0] {
+                    if *d > 0 {
+                        crate::os::sleep(std::time::Duration::from_millis(*d as u64));
+                    }
+                    Ok(Value::Nil)
+                } else {
+                    Err(SelError::Runtime(
+                        loc,
+                        "sleep-ms requires an integer argument".into(),
+                    ))
+                };
+            }
+            "time" | "time-now-ms" => {
+                if !args.is_empty() {
+                    return Err(SelError::SyntaxError(
+                        loc,
+                        "Expected exactly 0 arguments for time".into(),
+                    ));
+                }
+                let ms = crate::os::time_now_ms().map_err(|e| SelError::Runtime(loc, e))?;
+                return Ok(Value::Integer(ms));
+            }
+            "cwd" | "current-dir" => {
+                if !args.is_empty() {
+                    return Err(SelError::SyntaxError(
+                        loc,
+                        "Expected exactly 0 arguments for cwd".into(),
+                    ));
+                }
+                let cwd = crate::os::current_dir()
+                    .map_err(|e| SelError::Runtime(loc, format!("cwd failed: {e}")))?;
+                return Ok(Value::make_string(&cwd.to_string_lossy()));
+            }
+            "exists?" | "file-exists?" => {
+                if args.len() != 1 {
+                    return Err(SelError::SyntaxError(
+                        loc,
+                        "Expected exactly 1 argument for file-exists?".into(),
+                    ));
+                }
+                return if let Some(path) = args[0].to_string_lossy() {
+                    Ok(Value::Boolean(crate::os::exists(std::path::Path::new(
+                        &path,
+                    ))))
+                } else {
+                    Err(SelError::Runtime(
+                        loc,
+                        "file-exists? requires a string argument".into(),
+                    ))
+                };
+            }
+            "write" => return fs_write(loc, &args),
+            "read" => return fs_read(loc, &args),
+            "list" => return fs_list(loc, &args),
+            "delete" => return fs_delete(loc, &args),
             _ => {}
         }
     }
@@ -2452,7 +2501,7 @@ pub fn bit_shl(loc: Loc, args: Vec<Value>) -> Result<Value> {
                     format!("bit-shl: shift out of range: {}", shift),
                 ));
             }
-            Ok(Value::Integer(a << shift))
+            Ok(Value::Integer(a.wrapping_shl(*shift as u32)))
         }
         _ => Err(SelError::TypeError(
             loc,
@@ -2477,7 +2526,7 @@ pub fn bit_shr(loc: Loc, args: Vec<Value>) -> Result<Value> {
                     format!("bit-shr: shift out of range: {}", shift),
                 ));
             }
-            Ok(Value::Integer(a >> shift))
+            Ok(Value::Integer(a.wrapping_shr(*shift as u32)))
         }
         _ => Err(SelError::TypeError(
             loc,
@@ -2738,9 +2787,9 @@ pub fn sys_get_env(loc: Loc, args: Vec<Value>) -> Result<Value> {
             ),
         )
     })?;
-    match std::env::var(&key) {
-        Ok(val) => Ok(Value::make_string(&val)),
-        Err(_) => Ok(Value::Nil),
+    match crate::os::get_env(&key) {
+        Some(val) => Ok(Value::make_string(&val)),
+        None => Ok(Value::Nil),
     }
 }
 
@@ -2770,9 +2819,7 @@ pub fn sys_set_env(loc: Loc, args: Vec<Value>) -> Result<Value> {
             ),
         )
     })?;
-    unsafe {
-        std::env::set_var(&key, &val);
-    }
+    crate::os::set_env(&key, &val);
     Ok(Value::Nil)
 }
 
@@ -2784,10 +2831,8 @@ pub fn time_now_ms(loc: Loc, args: Vec<Value>) -> Result<Value> {
             actual: args.len(),
         });
     }
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_err(|e| SelError::Runtime(loc, format!("time-now-ms failed: {e}")))?
-        .as_millis() as i64;
+    let now = crate::os::time_now_ms()
+        .map_err(|e| SelError::Runtime(loc, format!("time-now-ms failed: {e}")))?;
     Ok(Value::Integer(now))
 }
 
@@ -2802,7 +2847,7 @@ pub fn sleep_ms(loc: Loc, args: Vec<Value>) -> Result<Value> {
     match args[0] {
         Value::Integer(ms) => {
             if ms > 0 {
-                std::thread::sleep(std::time::Duration::from_millis(ms as u64));
+                crate::os::sleep(std::time::Duration::from_millis(ms as u64));
             }
             Ok(Value::Nil)
         }
@@ -2936,7 +2981,7 @@ where
     P: AsRef<Path>,
 {
     let mut src =
-        std::fs::read_to_string(script_path).map_err(|e| SelError::Internal(e.to_string()))?;
+        crate::os::read_to_string(script_path).map_err(|e| SelError::Internal(e.to_string()))?;
     if src.starts_with("#!") {
         if let Some(newline_idx) = src.find('\n') {
             src = src[newline_idx + 1..].to_string();

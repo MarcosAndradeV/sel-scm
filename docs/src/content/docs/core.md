@@ -138,19 +138,28 @@ Records (`{key val}`) are manipulated using these functional primitives. They re
   (rcontains? {a 1} 'a) ; #t
   ```
 
-### System & File I/O (Message Passing)
+### Unified OS & Filesystem Interface (Message Passing)
 
-`sel` provides direct interfaces to OS primitives and the host filesystem via message-passing dispatch symbols.
+`sel` consolidates all operating system and host filesystem interactions into a single, unified message-passing interface: `(system message &args)`. The legacy `(file-system message &args)` primitive is retained as an alias forwarding directly to `system`.
 
 - `(system message &args)`:
-  - `(system 'args)`: Returns a list of strings representing the CLI arguments passed to the script.
-  - `(system 'getenv key-str)`: Retrieves an OS environment variable by key string. Returns `nil` if missing.
-  - `(system 'sleep secs-int)`: Pauses process execution for `secs-int` seconds.
-  - `(system 'exit code-int)`: Immediately terminates the `sel` process returning `code-int` status.
+  - **Process & Environment**:
+    - `(system 'args)`: Returns a list of strings representing the CLI arguments passed to the script.
+    - `(system 'getenv key-str)`: Retrieves an OS environment variable by key string. Returns `nil` if missing.
+    - `(system 'setenv key-str val-str)`: Sets an OS environment variable for the process.
+    - `(system 'cwd)`: Returns the current working directory path as a string.
+    - `(system 'time)`: Returns the current Unix epoch timestamp in milliseconds.
+    - `(system 'sleep secs-int)`: Pauses process execution for `secs-int` seconds.
+    - `(system 'sleep-ms ms-int)`: Pauses process execution for `ms-int` milliseconds.
+    - `(system 'exit code-int)`: Immediately terminates the `sel` process returning `code-int` status.
+  - **Filesystem Operations**:
+    - `(system 'exists? path-str)`: Returns `#t` if a file or directory exists at `path-str`, `#f` otherwise.
+    - `(system 'read path-str)`: Reads the entire contents of a file at `path-str` and returns it as a string.
+    - `(system 'write path-str content-str)`: Writes `content-str` to a file at `path-str`. Returns `nil` if successful.
+    - `(system 'list path-str)`: Returns a list of file/directory name strings located inside `path-str`.
+    - `(system 'delete path-str)`: Deletes the file or directory (recursively) at `path-str`. Returns `nil`.
 - `(file-system message &args)`:
-  - `(file-system 'exists? path-str)`: Returns `#t` if file exists at `path-str`.
-  - `(file-system 'read path-str)`: Reads the entire contents of a file at `path-str` and returns it as a string.
-  - `(file-system 'write path-str content-str)`: Writes `content-str` to a file at `path-str`. Returns `nil` if successful.
+  - Backwards-compatible alias for `(system message &args)`.
 
 ### Output & Logging
 
@@ -360,4 +369,15 @@ Allows functional error-handling patterns without stack-unwinding `try/catch` cl
     :do sum)
   ;; => (21 22 23)
   ```
+
+### Filesystem Conveniences
+
+Built-in wrappers over the unified `system` interface defined in `core.scm`:
+
+- `(fs-exists? path)`: Evaluates to `#t` if `path` exists.
+- `(fs-read path)`: Reads file contents as a string.
+- `(fs-write path content)`: Writes string `content` to `path`.
+- `(fs-list path)`: Lists directory contents.
+- `(fs-delete path)`: Deletes file or directory.
+
 

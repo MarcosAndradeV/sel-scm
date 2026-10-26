@@ -52,6 +52,7 @@ The source code is organized into modular components under `src/`:
 - **`src/compiler.rs`**: Bytecode compiler. Lowers parsed AST forms into linear VM bytecode instruction chunks (`Chunk` / `OpCode`). Bytecode is serialized into a flat linear byte buffer (`Vec<u8>`) with explicit compile-time jump patching to resolve control flow offsets, reducing execution overhead.
 - **`src/runtime.rs`**: Stack-based virtual machine evaluator. Contains the main instruction dispatch loop, environment binding maps, scope structures, tail call optimization (TCO), try/catch blocks, and coroutines. Local variables are compiled into stack index offsets and resolved via highly efficient `LoadLocal` and `StoreLocal` opcodes, bypassing dynamic environment map lookups.
 - **`src/value.rs`**: Primitive and compound value types (e.g. Lists, Records, Closures, Macros, Coroutines) and their coercion utilities.
+- **`src/os.rs`**: Unified operating system and filesystem interface (`Os`, `RealOs`, `SandboxedOs`). Centralizes all system, process, environment, and filesystem I/O operations under a single pluggable and sandbox-enforcing abstraction layer.
 - **`src/diagnostics.rs`**: Lexical, compile-time syntax, and runtime exception systems with line-number context reporting.
 
 ---
@@ -76,7 +77,6 @@ The source code is organized into modular components under `src/`:
   cargo fmt
   ```
 - **Documentation**: If you change language features, primitives, or REPL commands, update the corresponding documentation files:
-  - Markdown reference sheets: `docs/REFERENCE.md`, `docs/REPL.md`, and `docs/CORE.md`.
   - Astro docs: `docs/src/content/docs/reference.md`, `docs/src/content/docs/repl.md`, and `docs/src/content/docs/core.md`.
 
 ---

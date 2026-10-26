@@ -120,7 +120,7 @@ Executes a sequence of expressions in order and returns the value of the final e
 ```lisp
 (begin
   (println "Writing log...")
-  (file-system 'write "log.txt" "Operation complete")
+  (system 'write "log.txt" "Operation complete")
   #t)
 ```
 

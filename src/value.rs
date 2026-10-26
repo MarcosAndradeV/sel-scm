@@ -24,8 +24,7 @@ impl Closure {
         let mut rest_param = None;
         for (i, &pid) in params.iter().enumerate() {
             let name = lookup(pid);
-            if name.starts_with('&') {
-                let clean_name = &name[1..];
+            if let Some(clean_name) = name.strip_prefix('&') {
                 rest_param = Some((i, intern(clean_name)));
                 break;
             }
@@ -52,8 +51,7 @@ impl Macro {
         let mut rest_param = None;
         for (i, &pid) in params.iter().enumerate() {
             let name = lookup(pid);
-            if name.starts_with('&') {
-                let clean_name = &name[1..];
+            if let Some(clean_name) = name.strip_prefix('&') {
                 rest_param = Some((i, intern(clean_name)));
                 break;
             }

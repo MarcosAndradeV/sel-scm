@@ -8,7 +8,7 @@ use crate::diagnostics::SelError;
 use crate::internal::{drain_captured_output, enable_output_capture};
 use crate::lexer::Loc;
 use crate::parser::{parse_all, resolve_ast};
-use crate::runtime::{macro_expand, CallFrame, Env, VM};
+use crate::runtime::{CallFrame, Env, VM, macro_expand};
 use crate::types::{intern, lookup};
 use crate::value::Value;
 
@@ -386,7 +386,11 @@ pub fn ast_to_graph(ast: &Ast) -> AstGraphNode {
             children: vec![ast_to_graph(cond), ast_to_graph(body)],
         },
         Ast::Lambda(loc, params, body) => {
-            let param_names = params.iter().map(|p| lookup(*p)).collect::<Vec<_>>().join(" ");
+            let param_names = params
+                .iter()
+                .map(|p| lookup(*p))
+                .collect::<Vec<_>>()
+                .join(" ");
             let children = body.iter().map(ast_to_graph).collect();
             AstGraphNode {
                 name: "Lambda".into(),
@@ -449,7 +453,9 @@ pub fn ast_to_graph(ast: &Ast) -> AstGraphNode {
             children: items.iter().map(ast_to_graph).collect(),
         },
         Ast::Import(loc, id, alias) => {
-            let alias_str = alias.map(|a| format!(" as {}", lookup(a))).unwrap_or_default();
+            let alias_str = alias
+                .map(|a| format!(" as {}", lookup(a)))
+                .unwrap_or_default();
             AstGraphNode {
                 name: "Import".into(),
                 detail: Some(format!("{}{}", lookup(*id), alias_str)),
@@ -701,12 +707,7 @@ impl DebugSession {
             }
             Ok(None) => {
                 self.instructions_executed += 1;
-                let loc = self.current_loc();
-                if self.line_breakpoints.contains(&loc.line) {
-                    self.status = VmStatus::Paused;
-                } else {
-                    self.status = VmStatus::Paused;
-                }
+                self.status = VmStatus::Paused;
             }
             Err(err) => {
                 if !self.vm.catch_handlers.is_empty() {
@@ -864,16 +865,17 @@ mod tests {
     #[test]
     fn test_stepping_with_display() {
         let env = load_core_lib();
-        let mut session = DebugSession::new(
-            "(define x 42)\n(display x)\n(newline)",
-            env,
-        )
-        .expect("valid code");
+        let mut session =
+            DebugSession::new("(define x 42)\n(display x)\n(newline)", env).expect("valid code");
 
         let snap_final = session.resume_with_fuel(200);
         assert_eq!(snap_final.status, VmStatus::Halted);
         let joined_stdout = snap_final.stdout_drain.join("");
-        assert!(joined_stdout.contains("42"), "stdout should capture 42, got {:?}", joined_stdout);
+        assert!(
+            joined_stdout.contains("42"),
+            "stdout should capture 42, got {:?}",
+            joined_stdout
+        );
     }
 
     #[test]

@@ -108,6 +108,21 @@ These functions convert between character values and their corresponding integer
   ```lisp
   (empty? '()) ; #t
   ```
+- `(reverse x)`: Reverses the elements of list `x` or characters of string `x` natively.
+- `(append &lists)`: Concatenates zero or more lists (or strings) into a single list.
+  ```lisp
+  (append '(1 2) '(3 4) '(5)) ; (1 2 3 4 5)
+  ```
+- `(last x)`: Returns the final element of list `x` or final character of string `x` in $O(1)$ time (`nil` if empty).
+- `(range end [start [step]])`: Fast native integer sequence generator:
+  - `(range end)`: Sequence from `0` to `end - 1` with step `1`.
+  - `(range end start)`: Sequence from `start` to `end - 1` with step `1`.
+  - `(range end start step)`: Sequence from `start` to `end - 1` in increments of `step`.
+  ```lisp
+  (range 5)       ; (0 1 2 3 4)
+  (range 5 2)     ; (2 3 4)
+  (range 10 2 2)  ; (2 4 6 8)
+  ```
 
 ### Record Primitives
 
@@ -117,13 +132,15 @@ Records (`{key val}`) are manipulated using these functional primitives. They re
   ```lisp
   (rget {a 10} 'a) ; 10
   ```
-- `(rset record symbol value)`: Returns a new copy of `record` with the key `symbol` bound to `value`.
+- `(rset record symbol value)` / `(assoc record symbol value)`: Returns a new copy of `record` with the key `symbol` bound to `value`.
   ```lisp
-  (rset {a 1} 'b 2) ; {a 1 b 2}
+  (rset {a 1} 'b 2)  ; {a 1 b 2}
+  (assoc {a 1} 'b 2) ; {a 1 b 2}
   ```
-- `(rdel record symbol)`: Returns a copy of `record` with the key `symbol` removed.
+- `(rdel record symbol)` / `(dissoc record symbol)`: Returns a copy of `record` with the key `symbol` removed.
   ```lisp
-  (rdel {a 1 b 2} 'a) ; {b 2}
+  (rdel {a 1 b 2} 'a)   ; {b 2}
+  (dissoc {a 1 b 2} 'a) ; {b 2}
   ```
 - `(rkeys record)`: Returns a list containing all the symbol keys of the record.
   ```lisp
@@ -170,56 +187,44 @@ Records (`{key val}`) are manipulated using these functional primitives. They re
 
 ---
 
-## 2. Scheme Standard Library (core.scm)
+## 2. Interned Special Forms & Core Library (`core.scm`)
 
-These routines and macros are defined in the standard library file `core.scm` and loaded during interpreter initialization.
+High-frequency control flow, pattern matching, comprehension, and pipeline constructs are **interned directly into the Rust parser and bytecode compiler** for zero macro-expansion overhead, while higher-order functional combinators live in `core.scm`.
 
-### Logical Control & Assertions
+### Logical Control & Assertions (Interned Special Forms)
 
-- `(when test &body)`: If `test` is truthy, executes `body` expressions sequentially inside a `begin` block.
+- `(when test &body)`: If `test` is truthy, executes `body` expressions sequentially.
   ```lisp
   (when (= 1 1)
     (println "Math holds")
     (println "True!"))
   ```
-- `(unless test &body)`: If `test` is falsy, executes `body` expressions sequentially.
+- `(unless test false-branch [true-branch])`: If `test` is falsy, executes `false-branch`, otherwise `true-branch` (or `nil`).
   ```lisp
   (unless (= 1 2)
     (println "Inequal"))
   ```
-- `(cond &xs)`: Multi-branch conditional selection. Takes pairs of test/consequent expressions. Runs the first matching condition. If the final test is `#t`, it acts as a default block.
+- `(cond (test body...) ... [(else body...)])`: Standard Scheme multi-branch conditional selection. Evaluates each clause's `test` in order and executes the body of the first truthy clause. Supports `else` (or `:else`) as the catch-all clause and optional `:do` markers:
   ```lisp
   (cond
-    (= x 1) "One"
-    (= x 2) "Two"
-    #t      "Other")
+    ((= x 1) "One")
+    ((= x 2) "Two")
+    (else    "Other"))
   ```
-- `(assert test &args)`: Evaluates `test`. If it evaluates to `#f` or `nil`, throws a runtime error. Optionally prints additional argument context.
+- `(assert test [msg...])`: Interned assertion form. Evaluates `test`; if `#f` or `nil`, raises a runtime error at the caller's source location without evaluating `msg` on passing assertions.
   ```lisp
   (assert (= 2 2) "Math is broken!")
   ```
 
 ### Iteration Loops
 
-These macros allow sequential looping constructs natively using TCO recursions.
+- `(while test &body)`: Interned loop form that executes `body` continuously as long as `test` evaluates to truthy.
+- `(until test &body)`: Interned loop form that executes `body` continuously until `test` evaluates to truthy.
+- `(repeat f n)`: Tail-recursive helper in `core.scm` that executes a zero-argument function `f` `n` times.
 
-- `(while test &body)`: Loops and executes `body` continuously as long as `test` evaluates to truthy.
-  ```lisp
-  (define i 0)
-  (while (< i 5)
-    (println i)
-    (set! i (+ i 1)))
-  ```
-- `(until test &body)`: Loops and executes `body` continuously until `test` evaluates to truthy.
-  ```lisp
-  (define i 0)
-  (until (= i 5)
-    (println i)
-    (set! i (+ i 1)))
-  ```
-- `(repeat f n)`: Executes a zero-argument function `f` exactly `n` times recursive-style.
+### Tail-Recursive Functional List Combinators (`core.scm`)
 
-### Functional List Utilities
+All standard list combinators in `core.scm` are tail-recursive (TCO) and safe on large lists:
 
 - `(map f l)`: Applies a one-argument function `f` to each element in list `l`, returning a new list of results.
   ```lisp
@@ -229,43 +234,23 @@ These macros allow sequential looping constructs natively using TCO recursions.
   ```lisp
   (filter even? '(1 2 3 4)) ; (2 4)
   ```
-- `(foldl f acc l)`: Left-associative list fold (reduce). Accumulates list values starting from the left.
+- `(foldl f acc l)`: Tail-recursive left-associative list fold (reduce).
   ```lisp
   (foldl + 0 '(1 2 3)) ; 6
   ```
-- `(foldr f acc l)`: Right-associative list fold (reduce). Accumulates list values starting from the right.
-- `(reverse l)`: Reverses the elements of list `l`.
-- `(range &args)`: Convenient number sequence generator.
-  - `(range end)`: Evaluates sequence from `0` to `end - 1` with step `1`.
-  - `(range end begin)`: Evaluates from `begin` to `end - 1` with step `1`.
-  - `(range end begin step)`: Evaluates from `begin` to `end - 1` in increments of `step`.
-  ```lisp
-  (range 5)       ; (0 1 2 3 4)
-  (range 5 2)     ; (2 3 4)
-  (range 10 2 2)  ; (2 4 6 8)
-  ```
-- `(even? x)`: Returns `#t` if `x` is divisible by `2`.
-
-### List Manipulation
-
-- `(last l)`: Returns the final element of list `l`.
-- `(append l1 l2)`: Concatenates list `l1` and `l2` into a single list.
-  ```lisp
-  (append '(1 2) '(3 4)) ; (1 2 3 4)
-  ```
+- `(foldr f acc l)`: Tail-recursive right-associative list fold (reduce).
+- `(even? x)` / `(odd? x)`: Returns `#t` if integer `x` is even or odd.
 
 ### Promises & Laziness
 
-Allows deferred lazy evaluation patterns.
-
-- `(delay expr)`: *Macro*. Wraps `expr` inside a zero-argument lambda promise to avoid immediate evaluation.
+- `(delay expr...)`: *Interned Special Form*. Wraps `expr` inside a zero-argument lambda promise without runtime macro overhead.
 - `(force promise)`: Forces evaluation of a lazy promise.
   ```lisp
   (define lazy-value (delay (+ 10 20))) ; Not evaluated yet
   (force lazy-value)                    ; Evaluates and returns 30
   ```
 
-### Monadic Error Types
+### Monadic Error Types (`core.scm`)
 
 Allows functional error-handling patterns without stack-unwinding `try/catch` clauses. Monads return structures tagged with `'ok` or `'err`.
 
@@ -276,101 +261,25 @@ Allows functional error-handling patterns without stack-unwinding `try/catch` cl
 - `(unwrap x)`: Extracts the value inside an ok container. Throws an exception if `x` is an error container.
 - `(error-value x)`: Extracts the error message inside an err container.
 - `(attempt expr)`: *Macro*. Wraps the evaluation of `expr` inside a try-catch, returning `(ok result)` if successful, or `(err exception)` if it failed.
-  ```lisp
-  (define res (attempt (/ 1 0))) ; (err "Called division by zero")
-  ```
-- `(try-bind val var body)`: *Macro*. Evaluates monadic `val`. If it is an error container, immediately returns that container; if it is successful, binds the unwrapped value to `var` and evaluates the `body` block. Perfect for chaining monadic calls.
+- `(try-bind val var body)`: *Macro*. Evaluates monadic `val`; short-circuits on error or binds the unwrapped value to `var` and evaluates `body`.
 
-### Record Extensions
+### Syntactic Helpers (Interned Special Forms)
 
-- `(assoc record k v)`: Wrapper for native `rset`. Binds key `k` to value `v` inside `record`.
-- `(dissoc record k)`: Wrapper for native `rdel`. Removes key `k` from `record`.
-
-### Syntactic Helpers
-
-- `(ffi-func symbol return-type argument-types)`: Conveniently maps a raw FFI symbol pointer to an anonymous Scheme lambda, allowing the library symbol to be called like any standard Scheme function.
-  ```lisp
-  (define puts-fn (ffi-func (ffi-dlsym libc "puts") 'i32 '(*u8)))
-  (puts-fn "Called easily via Scheme wrapper!")
-  ```
-
-### Pattern Matching Helpers
-
-- `(match-lambda &clauses)`: *Macro*. Creates an anonymous lambda of one argument that immediately pattern matches the argument against `clauses`:
+- `(ffi-func symbol return-type argument-types)`: Interned special form that wraps a raw FFI symbol pointer in a Scheme closure.
+- `(match-lambda &clauses)`: Interned special form that creates an anonymous single-argument lambda that pattern-matches its argument against `clauses`:
   ```lisp
   (define describe-num
     (match-lambda
       (0 "zero")
       (1 "one")
       (n (+ n 100))))
-
-  (describe-num 0) ; "zero"
-  (describe-num 5) ; 105
   ```
+- `(defn head &clauses)`: Interned special form that defines a named function using multi-clause pattern matching (Elixir/Erlang style).
+- `(|> val &forms)` and `(-> val &forms)`: Interned thread-last and thread-first pipeline forms lowered directly during AST optimization.
+- `(with [clauses] :do body ... [:else ...])`: Interned railway-oriented pattern-matching chain.
+- `(for (pat seq) ... [:let (bindings)] [:when cond] :do body ...)`: Interned list comprehension lowered directly to tail-recursive folds and pattern matches.
 
-- `(defn head &clauses)`: *Macro*. Defines a named function using multi-clause pattern matching (Elixir/Erlang style). Supports `:where` / `:when` guards and `:do` markers:
-  ```lisp
-  (defn fib
-    (0 :do 0)
-    (1 :do 1)
-    (n :do (+ (fib (- n 1)) (fib (- n 2)))))
-
-  (defn (classify-age age)
-    (n :where (< n 0) :do "invalid")
-    (n :when (< n 18) :do "minor")
-    (_ :do "adult"))
-  ```
-
-### Pipelines
-
-- `(|> val &forms)`: *Macro*. Elixir/OCaml-style thread-last pipeline operator. Pipes `val` into subsequent function calls as the **last** argument (or as the sole argument if given a bare function identifier). Ideal for collection workflows with `map`, `filter`, and `foldr`:
-  ```lisp
-  (|> (range 10)
-      (filter even?)
-      (map \(x) (* x x))
-      reverse)
-  ```
-
-- `(-> val &forms)`: *Macro*. Thread-first pipeline operator. Injects `val` as the **first** argument after the function name in each subsequent form. Ideal for record transformations:
-  ```lisp
-  (-> user
-      (assoc 'balance 500)
-      (dissoc 'temporary-token))
-  ```
-
-### Railway-Oriented Programming
-
-- `(with [clauses] :do body ... [:else (err-pat err-body ...) ...])`: *Macro*. Chains pattern matching operations where each step must match its pattern to proceed. If any step fails to match, execution short-circuits immediately. If `:else` clauses are provided, the mismatched value is dispatched to the matching `:else` clause; if no `:else` is given, the non-matching value is returned directly:
-  ```lisp
-  (with (((list 'ok user) (fetch-user id))
-         ((list 'ok perms) (fetch-perms user)))
-    :do
-    (list user perms)
-    :else
-    ((list 'error 'not-found) "User not found")
-    ((list 'error 'no-perms) "Permissions missing"))
-  ```
-
-### List Comprehensions
-
-- `(for (var seq) ... [:let (bindings)] [:when cond] :do body ...)`: *Macro*. Expressive list comprehension over one or more generators. Supports nested cartesian product traversals, intermediate `:let` bindings, conditional filtering with `:when` or `:where`, and structural pattern matching on generator items:
-  ```lisp
-  ;; Filtered square calculation
-  (for (x (range 10))
-    :when (= (mod x 2) 0)
-    :do (* x x))
-  ;; => (0 4 16 36 64)
-
-  ;; Cartesian product with local bindings
-  (for (x '(1 2 3))
-       (y '(10 20))
-    :let ((sum (+ x y)))
-    :when (> sum 15)
-    :do sum)
-  ;; => (21 22 23)
-  ```
-
-### Filesystem Conveniences
+### Filesystem Conveniences (`core.scm`)
 
 Built-in wrappers over the unified `system` interface defined in `core.scm`:
 

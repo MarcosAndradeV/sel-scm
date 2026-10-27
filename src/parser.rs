@@ -5,6 +5,17 @@ use crate::types::{intern, lookup};
 
 type Result<T> = std::result::Result<T, SelError>;
 
+static PARSER_GEN_COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+fn gen_parser_id(prefix: &str) -> u32 {
+    let id = PARSER_GEN_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    intern(&format!("{}_{}", prefix, id))
+}
+
+fn is_sym(ast: &Ast, target: &str) -> bool {
+    matches!(ast, Ast::Symbol(_, id) if lookup(*id) == target)
+}
+
 pub fn optimize_ast(list: Vec<Ast>, loc: Loc) -> Result<Ast> {
     if list.is_empty() {
         return Ok(Ast::Nil(loc));
@@ -33,20 +44,98 @@ pub fn optimize_ast(list: Vec<Ast>, loc: Loc) -> Result<Ast> {
                 })?;
                 for ast in iter {
                     match ast {
-                        Ast::List(loc, mut list) => {
-                            if list.is_empty() {
-                                list.push(first_v);
+                        Ast::List(f_loc, mut f_list) => {
+                            if f_list.is_empty() {
+                                f_list.push(first_v);
                             } else {
-                                list.insert(1, first_v);
+                                f_list.insert(1, first_v);
                             }
-                            first_v = optimize_ast(list, loc)?;
+                            first_v = Ast::List(f_loc, f_list);
                         }
                         s => {
-                            first_v = optimize_ast(vec![s, first_v], loc)?;
+                            let f_loc = s.loc();
+                            first_v = Ast::List(f_loc, vec![s, first_v]);
                         }
                     }
                 }
                 Ok(first_v)
+            }
+            "|>" => {
+                let mut iter = list.into_iter().skip(1);
+                let mut first_v = iter.next().ok_or_else(|| {
+                    SelError::SyntaxError(s_loc, "Missing first expression in `|>`".into())
+                })?;
+                for ast in iter {
+                    match ast {
+                        Ast::List(f_loc, mut f_list) => {
+                            f_list.push(first_v);
+                            first_v = Ast::List(f_loc, f_list);
+                        }
+                        s => {
+                            let f_loc = s.loc();
+                            first_v = Ast::List(f_loc, vec![s, first_v]);
+                        }
+                    }
+                }
+                Ok(first_v)
+            }
+            "defn" => parse_defn(list, s_loc),
+            "match-lambda" => {
+                let iter = list.into_iter().skip(1);
+                let mut clauses = Vec::new();
+                for clause_ast in iter {
+                    clauses.push(parse_match_clause(clause_ast)?);
+                }
+                if clauses.is_empty() {
+                    return Err(SelError::SyntaxError(
+                        s_loc,
+                        "Expected at least one clause in match-lambda".into(),
+                    ));
+                }
+                let arg_sym = gen_parser_id("_match_arg");
+                Ok(Ast::Lambda(
+                    s_loc,
+                    vec![arg_sym],
+                    vec![Ast::Match(
+                        s_loc,
+                        Box::new(Ast::Symbol(s_loc, arg_sym)),
+                        clauses,
+                    )],
+                ))
+            }
+            "with" => parse_with(list, s_loc),
+            "for" => parse_for(list, s_loc),
+            "delay" => {
+                let body: Vec<Ast> = list.into_iter().skip(1).collect();
+                if body.is_empty() {
+                    return Err(SelError::SyntaxError(
+                        s_loc,
+                        "Expected expression in delay".into(),
+                    ));
+                }
+                Ok(Ast::Lambda(s_loc, Vec::new(), body))
+            }
+            "assert" => {
+                let mut iter = list.into_iter().skip(1);
+                let cond = iter.next().ok_or_else(|| {
+                    SelError::SyntaxError(s_loc, "Expected condition in assert".into())
+                })?;
+                let mut err_call = vec![Ast::Symbol(s_loc, intern("error"))];
+                if let Some(msg) = iter.next() {
+                    err_call.push(Ast::String(s_loc, "Assert failed:".to_string()));
+                    err_call.push(msg);
+                    for extra in iter {
+                        err_call.push(extra);
+                    }
+                } else {
+                    err_call.push(Ast::String(s_loc, "Assert failed".to_string()));
+                }
+                Ok(Ast::Unless(
+                    s_loc,
+                    Box::new(cond),
+                    Box::new(Ast::List(s_loc, err_call)),
+                    None,
+                ))
             }
             "import" => {
                 let mut iter = list.into_iter().skip(1);
@@ -200,17 +289,48 @@ pub fn optimize_ast(list: Vec<Ast>, loc: Loc) -> Result<Ast> {
                     false_branch.map(Box::new),
                 ))
             }
-            // "cond" => {
-            //     let mut iter = list.into_iter().skip(1);
-            //     let mut branches = Vec::new();
-            //     while let Some(cond) = iter.next() {
-            //         let expr = iter.next().ok_or_else(|| {
-            //             SelError::SyntaxError(s_loc, "Missing expr in cond".into())
-            //         })?;
-            //         branches.push((cond, expr));
-            //     }
-            //     Ok(Ast::Cond(s_loc, branches))
-            // }
+            "cond" => {
+                let iter = list.into_iter().skip(1);
+                let mut branches = Vec::new();
+                for clause in iter {
+                    match clause {
+                        Ast::List(c_loc, mut items) => {
+                            if items.is_empty() {
+                                return Err(SelError::SyntaxError(
+                                    c_loc,
+                                    "Empty clause in cond".into(),
+                                ));
+                            }
+                            let raw_cond = items.remove(0);
+                            let cond_ast = if let Ast::Symbol(_, sym_id) = &raw_cond
+                                && matches!(lookup(*sym_id).as_str(), "else" | ":else")
+                            {
+                                Ast::Boolean(c_loc, true)
+                            } else {
+                                raw_cond
+                            };
+                            if !items.is_empty() && is_sym(&items[0], ":do") {
+                                items.remove(0);
+                            }
+                            let body_ast = if items.is_empty() {
+                                Ast::Nil(c_loc)
+                            } else if items.len() == 1 {
+                                items.remove(0)
+                            } else {
+                                Ast::Begin(c_loc, items)
+                            };
+                            branches.push((cond_ast, body_ast));
+                        }
+                        other => {
+                            return Err(SelError::SyntaxError(
+                                other.loc(),
+                                "Expected list clause (test body...) in cond".into(),
+                            ));
+                        }
+                    }
+                }
+                Ok(Ast::Cond(s_loc, branches))
+            }
             "ffi-func" => {
                 // (define puts (ffi-func 'i32 '('*u8)))
                 let mut iter = list.into_iter().skip(1);
@@ -263,7 +383,7 @@ pub fn optimize_ast(list: Vec<Ast>, loc: Loc) -> Result<Ast> {
                 let body = iter.collect();
                 Ok(Ast::When(s_loc, Box::new(cond), body))
             }
-            "lambda" => {
+            "lambda" | "fn" => {
                 let mut iter = list.into_iter().skip(1);
                 let params_ast = iter.next().ok_or_else(|| {
                     SelError::SyntaxError(s_loc, "Missing parameters in lambda".into())
@@ -420,7 +540,8 @@ pub fn optimize_ast(list: Vec<Ast>, loc: Loc) -> Result<Ast> {
                 })?;
                 Ok(Ast::Set(s_loc, name_id, Box::new(value_ast)))
             }
-            "let" => {
+            "let" | "let*" => {
+                let is_star = lookup(id) == "let*";
                 let mut iter = list.into_iter().skip(1);
                 let bindings_ast = iter.next().ok_or_else(|| {
                     SelError::SyntaxError(s_loc, "Expected bindings in let".into())
@@ -462,8 +583,16 @@ pub fn optimize_ast(list: Vec<Ast>, loc: Loc) -> Result<Ast> {
                         ));
                     }
                 }
-                let body = iter.collect();
-                Ok(Ast::Let(s_loc, bindings, body))
+                let body: Vec<Ast> = iter.collect();
+                if is_star && bindings.len() > 1 {
+                    let mut current_body = body;
+                    for (b_id, b_val) in bindings.into_iter().rev() {
+                        current_body = vec![Ast::Let(s_loc, vec![(b_id, b_val)], current_body)];
+                    }
+                    Ok(current_body.pop().unwrap())
+                } else {
+                    Ok(Ast::Let(s_loc, bindings, body))
+                }
             }
             "quote" => {
                 let mut iter = list.into_iter().skip(1);
@@ -749,7 +878,26 @@ pub fn resolve_ast(ast: Ast) -> Result<Ast> {
             }
             if let Some(Ast::Symbol(_, sym_id)) = list.first() {
                 let s = lookup(*sym_id);
-                if s == "match" || s == "try" {
+                if matches!(
+                    s.as_str(),
+                    "match"
+                        | "try"
+                        | "->"
+                        | "|>"
+                        | "cond"
+                        | "defn"
+                        | "match-lambda"
+                        | "with"
+                        | "for"
+                        | "let"
+                        | "let*"
+                        | "lambda"
+                        | "fn"
+                        | "define"
+                        | "defmacro"
+                        | "delay"
+                        | "assert"
+                ) {
                     let opt_ast = optimize_ast(list, loc)?;
                     return resolve_ast(opt_ast);
                 }
@@ -857,6 +1005,56 @@ pub fn resolve_ast(ast: Ast) -> Result<Ast> {
                 resolved_branches.push((resolve_ast(c)?, resolve_ast(e)?));
             }
             Ok(Ast::Cond(loc, resolved_branches))
+        }
+        Ast::While(loc, cond, body) => {
+            let resolved_cond = resolve_ast(*cond)?;
+            let resolved_body = match *body {
+                Ast::List(b_loc, exprs) => {
+                    let mut r = Vec::with_capacity(exprs.len());
+                    for e in exprs {
+                        r.push(resolve_ast(e)?);
+                    }
+                    Ast::List(b_loc, r)
+                }
+                other => resolve_ast(other)?,
+            };
+            Ok(Ast::While(
+                loc,
+                Box::new(resolved_cond),
+                Box::new(resolved_body),
+            ))
+        }
+        Ast::Until(loc, cond, body) => {
+            let resolved_cond = resolve_ast(*cond)?;
+            let resolved_body = match *body {
+                Ast::List(b_loc, exprs) => {
+                    let mut r = Vec::with_capacity(exprs.len());
+                    for e in exprs {
+                        r.push(resolve_ast(e)?);
+                    }
+                    Ast::List(b_loc, r)
+                }
+                other => resolve_ast(other)?,
+            };
+            Ok(Ast::Until(
+                loc,
+                Box::new(resolved_cond),
+                Box::new(resolved_body),
+            ))
+        }
+        Ast::And(loc, exprs) => {
+            let mut r = Vec::with_capacity(exprs.len());
+            for e in exprs {
+                r.push(resolve_ast(e)?);
+            }
+            Ok(Ast::And(loc, r))
+        }
+        Ast::Or(loc, exprs) => {
+            let mut r = Vec::with_capacity(exprs.len());
+            for e in exprs {
+                r.push(resolve_ast(e)?);
+            }
+            Ok(Ast::Or(loc, r))
         }
         Ast::Yield(loc, expr) => Ok(Ast::Yield(loc, Box::new(resolve_ast(*expr)?))),
         Ast::CoResume(loc, co, arg) => Ok(Ast::CoResume(
@@ -1180,4 +1378,372 @@ fn parse_try(list: Vec<Ast>, s_loc: Loc) -> Result<Ast> {
             "Expected catch clause to be a list".into(),
         )),
     }
+}
+
+fn parse_defn(list: Vec<Ast>, s_loc: Loc) -> Result<Ast> {
+    let mut iter = list.into_iter().skip(1);
+    let sig = iter
+        .next()
+        .ok_or_else(|| SelError::SyntaxError(s_loc, "Expected signature in defn".into()))?;
+    let mut clauses = Vec::new();
+    for clause_ast in iter {
+        clauses.push(parse_match_clause(clause_ast)?);
+    }
+    if clauses.is_empty() {
+        return Err(SelError::SyntaxError(
+            s_loc,
+            "Expected at least one clause in defn".into(),
+        ));
+    }
+    match sig {
+        Ast::Symbol(_, name_id) => {
+            let arg_sym = gen_parser_id("_defn_arg");
+            let match_ast = Ast::Match(s_loc, Box::new(Ast::Symbol(s_loc, arg_sym)), clauses);
+            Ok(Ast::Define(
+                s_loc,
+                name_id,
+                Box::new(Ast::Lambda(s_loc, vec![arg_sym], vec![match_ast])),
+            ))
+        }
+        Ast::List(sig_loc, mut sig_items) => {
+            if sig_items.is_empty() {
+                return Err(SelError::SyntaxError(
+                    sig_loc,
+                    "Empty signature in defn".into(),
+                ));
+            }
+            let head = sig_items.remove(0);
+            let Ast::Symbol(_, name_id) = head else {
+                return Err(SelError::SyntaxError(
+                    sig_loc,
+                    "Expected function name symbol in defn signature".into(),
+                ));
+            };
+            let mut params = Vec::new();
+            let mut arg_exprs = Vec::new();
+            for p in sig_items {
+                match p {
+                    Ast::Symbol(p_loc, id) => {
+                        params.push(id);
+                        arg_exprs.push(Ast::Symbol(p_loc, id));
+                    }
+                    Ast::Bind(p_loc, id) => {
+                        let name = lookup(id);
+                        params.push(intern(&format!("&{}", name)));
+                        arg_exprs.push(Ast::Symbol(p_loc, id));
+                    }
+                    _ => {
+                        return Err(SelError::SyntaxError(
+                            sig_loc,
+                            "Expected parameter identifier in defn signature".into(),
+                        ));
+                    }
+                }
+            }
+            let target_ast = if arg_exprs.len() == 1 {
+                arg_exprs.remove(0)
+            } else {
+                let mut list_call = vec![Ast::Symbol(sig_loc, intern("list"))];
+                list_call.extend(arg_exprs);
+                Ast::List(sig_loc, list_call)
+            };
+            let match_ast = Ast::Match(s_loc, Box::new(target_ast), clauses);
+            Ok(Ast::Define(
+                s_loc,
+                name_id,
+                Box::new(Ast::Lambda(s_loc, params, vec![match_ast])),
+            ))
+        }
+        _ => Err(SelError::SyntaxError(
+            s_loc,
+            "Expected symbol or (name args...) signature in defn".into(),
+        )),
+    }
+}
+
+fn parse_with(list: Vec<Ast>, s_loc: Loc) -> Result<Ast> {
+    let args: Vec<Ast> = list.into_iter().skip(1).collect();
+    let (clauses_asts, body_asts, else_asts) =
+        if let Some(do_pos) = args.iter().position(|a| is_sym(a, ":do")) {
+            let before_do = args[..do_pos].to_vec();
+            let after_do = args[do_pos + 1..].to_vec();
+            let clauses = if before_do.len() == 1
+                && let Ast::List(_, inner) = &before_do[0]
+                && !inner.is_empty()
+                && matches!(&inner[0], Ast::List(_, _))
+            {
+                inner.clone()
+            } else {
+                before_do
+            };
+            if let Some(else_pos) = after_do.iter().position(|a| is_sym(a, ":else")) {
+                (
+                    clauses,
+                    after_do[..else_pos].to_vec(),
+                    after_do[else_pos + 1..].to_vec(),
+                )
+            } else {
+                (clauses, after_do, Vec::new())
+            }
+        } else if !args.is_empty()
+            && let Ast::List(_, inner) = &args[0]
+        {
+            (inner.clone(), args[1..].to_vec(), Vec::new())
+        } else {
+            return Err(SelError::SyntaxError(
+                s_loc,
+                "with requires :do or clauses list".into(),
+            ));
+        };
+
+    let err_sym = gen_parser_id("_with_err");
+    let else_handler_sym = gen_parser_id("_with_else");
+    let else_fn_def = if else_asts.is_empty() {
+        Ast::Lambda(s_loc, vec![err_sym], vec![Ast::Symbol(s_loc, err_sym)])
+    } else {
+        let mut else_clauses = Vec::with_capacity(else_asts.len());
+        for c in else_asts {
+            else_clauses.push(parse_match_clause(c)?);
+        }
+        Ast::Lambda(
+            s_loc,
+            vec![err_sym],
+            vec![Ast::Match(
+                s_loc,
+                Box::new(Ast::Symbol(s_loc, err_sym)),
+                else_clauses,
+            )],
+        )
+    };
+
+    let mut current = if body_asts.is_empty() {
+        Ast::Nil(s_loc)
+    } else if body_asts.len() == 1 {
+        body_asts.into_iter().next().unwrap()
+    } else {
+        Ast::Begin(s_loc, body_asts)
+    };
+
+    for c_ast in clauses_asts.into_iter().rev() {
+        let Ast::List(c_loc, mut c_items) = c_ast else {
+            return Err(SelError::SyntaxError(
+                c_ast.loc(),
+                "Expected clause list in with".into(),
+            ));
+        };
+        let fail_sym = gen_parser_id("_with_fail");
+        let fail_clause = MatchClause {
+            loc: c_loc,
+            pattern: Pattern::Variable(c_loc, fail_sym),
+            guard: None,
+            body: vec![Ast::List(
+                c_loc,
+                vec![
+                    Ast::Symbol(c_loc, else_handler_sym),
+                    Ast::Symbol(c_loc, fail_sym),
+                ],
+            )],
+        };
+        if c_items.len() == 2 {
+            let expr = c_items.pop().unwrap();
+            let pat = parse_pattern(c_items.pop().unwrap())?;
+            let ok_clause = MatchClause {
+                loc: c_loc,
+                pattern: pat,
+                guard: None,
+                body: vec![current],
+            };
+            current = Ast::Match(c_loc, Box::new(expr), vec![ok_clause, fail_clause]);
+        } else if c_items.len() == 4 {
+            let expr = c_items.pop().unwrap();
+            let guard_expr = c_items.pop().unwrap();
+            let guard_kw = c_items.pop().unwrap();
+            if !is_sym(&guard_kw, ":when")
+                && !is_sym(&guard_kw, ":where")
+                && !is_sym(&guard_kw, "when")
+                && !is_sym(&guard_kw, "where")
+            {
+                return Err(SelError::SyntaxError(
+                    c_loc,
+                    "Expected :when or :where in with clause".into(),
+                ));
+            }
+            let pat = parse_pattern(c_items.pop().unwrap())?;
+            let ok_clause = MatchClause {
+                loc: c_loc,
+                pattern: pat,
+                guard: Some(guard_expr),
+                body: vec![current],
+            };
+            current = Ast::Match(c_loc, Box::new(expr), vec![ok_clause, fail_clause]);
+        } else {
+            return Err(SelError::SyntaxError(
+                c_loc,
+                "Invalid clause format in with".into(),
+            ));
+        }
+    }
+
+    Ok(Ast::Let(
+        s_loc,
+        vec![(else_handler_sym, else_fn_def)],
+        vec![current],
+    ))
+}
+
+fn parse_for(list: Vec<Ast>, s_loc: Loc) -> Result<Ast> {
+    let args: Vec<Ast> = list.into_iter().skip(1).collect();
+    let mut gens = Vec::new();
+    let mut idx = 0;
+
+    if !args.is_empty()
+        && let Ast::List(_, inner) = &args[0]
+        && !inner.is_empty()
+        && matches!(&inner[0], Ast::List(_, _))
+    {
+        gens = inner.clone();
+        idx = 1;
+    } else {
+        while idx < args.len() {
+            if is_sym(&args[idx], ":do")
+                || is_sym(&args[idx], ":let")
+                || is_sym(&args[idx], ":when")
+                || is_sym(&args[idx], ":where")
+            {
+                break;
+            }
+            gens.push(args[idx].clone());
+            idx += 1;
+        }
+    }
+
+    let mut let_bindings: Option<Ast> = None;
+    let mut when_cond: Option<Ast> = None;
+    let mut body_asts: Vec<Ast> = Vec::new();
+
+    while idx < args.len() {
+        if is_sym(&args[idx], ":do") {
+            body_asts = args[idx + 1..].to_vec();
+            break;
+        } else if is_sym(&args[idx], ":let") {
+            let lb = args.get(idx + 1).cloned().ok_or_else(|| {
+                SelError::SyntaxError(s_loc, "Missing bindings after :let in for".into())
+            })?;
+            let_bindings = Some(lb);
+            idx += 2;
+        } else if is_sym(&args[idx], ":when") || is_sym(&args[idx], ":where") {
+            let wc = args.get(idx + 1).cloned().ok_or_else(|| {
+                SelError::SyntaxError(s_loc, "Missing condition after :when/:where in for".into())
+            })?;
+            when_cond = Some(wc);
+            idx += 2;
+        } else {
+            return Err(SelError::SyntaxError(
+                args[idx].loc(),
+                "Unexpected token in for".into(),
+            ));
+        }
+    }
+
+    if gens.is_empty() {
+        return Err(SelError::SyntaxError(
+            s_loc,
+            "for requires at least one generator".into(),
+        ));
+    }
+
+    let core_body = if body_asts.is_empty() {
+        Ast::Nil(s_loc)
+    } else if body_asts.len() == 1 {
+        body_asts.into_iter().next().unwrap()
+    } else {
+        Ast::Begin(s_loc, body_asts)
+    };
+
+    let mut current_loop: Option<Ast> = None;
+    for (rev_idx, g_ast) in gens.into_iter().rev().enumerate() {
+        let Ast::List(g_loc, mut g_items) = g_ast else {
+            return Err(SelError::SyntaxError(
+                g_ast.loc(),
+                "Expected generator (pattern seq) in for".into(),
+            ));
+        };
+        if g_items.len() != 2 {
+            return Err(SelError::SyntaxError(
+                g_loc,
+                "Generator in for must have exactly 2 elements: (pattern seq)".into(),
+            ));
+        }
+        let seq = g_items.pop().unwrap();
+        let pat = parse_pattern(g_items.pop().unwrap())?;
+        let item_sym = gen_parser_id("_for_item");
+        let acc_sym = gen_parser_id("_for_acc");
+
+        let match_body = if rev_idx == 0 {
+            let cons_call = Ast::List(
+                g_loc,
+                vec![
+                    Ast::Symbol(g_loc, intern("cons")),
+                    core_body.clone(),
+                    Ast::Symbol(g_loc, acc_sym),
+                ],
+            );
+            let if_action = match &when_cond {
+                Some(cond) => Ast::If(
+                    g_loc,
+                    Box::new(cond.clone()),
+                    Box::new(cons_call),
+                    Some(Box::new(Ast::Symbol(g_loc, acc_sym))),
+                ),
+                None => cons_call,
+            };
+            match &let_bindings {
+                Some(lb) => optimize_ast(
+                    vec![Ast::Symbol(g_loc, intern("let")), lb.clone(), if_action],
+                    g_loc,
+                )?,
+                None => if_action,
+            }
+        } else {
+            Ast::List(
+                g_loc,
+                vec![
+                    Ast::Symbol(g_loc, intern("append")),
+                    current_loop.take().unwrap(),
+                    Ast::Symbol(g_loc, acc_sym),
+                ],
+            )
+        };
+
+        let match_ast = Ast::Match(
+            g_loc,
+            Box::new(Ast::Symbol(g_loc, item_sym)),
+            vec![
+                MatchClause {
+                    loc: g_loc,
+                    pattern: pat,
+                    guard: None,
+                    body: vec![match_body],
+                },
+                MatchClause {
+                    loc: g_loc,
+                    pattern: Pattern::Wildcard(g_loc),
+                    guard: None,
+                    body: vec![Ast::Symbol(g_loc, acc_sym)],
+                },
+            ],
+        );
+
+        current_loop = Some(Ast::List(
+            g_loc,
+            vec![
+                Ast::Symbol(g_loc, intern("foldr")),
+                Ast::Lambda(g_loc, vec![item_sym, acc_sym], vec![match_ast]),
+                Ast::Quote(g_loc, Box::new(Ast::Nil(g_loc))),
+                seq,
+            ],
+        ));
+    }
+
+    Ok(current_loop.unwrap())
 }

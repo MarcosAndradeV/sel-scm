@@ -1,13 +1,19 @@
 ;; tests/test_string_sequence.scm - String as List-of-Chars Sequence Semantics
 
-;; 1. car and cdr
+;; 1. car and cdr (including first-class higher-order usage)
 (assert (eq? (car "hello") #\h))
+(assert (eq? (car "world") #\w))
+(assert (eq? (car "A") #\A))
+(define my-car car)
+(assert (eq? (my-car "test") #\t))
 (assert (eq? (cdr "hello") "ello"))
 (assert (eq? (car (cdr "hello")) #\e))
 (assert (eq? (cdr (cdr "hello")) "llo"))
 (assert (eq? (cdr "h") '()))
 (assert (eq? (car "") '()))
 (assert (eq? (cdr "") '()))
+(assert (eq? (reverse "hello") "olleh"))
+(assert (eq? (last "hello") #\o))
 
 ;; 2. cons
 (assert (eq? (cons #\h "ello") "hello"))

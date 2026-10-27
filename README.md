@@ -6,10 +6,10 @@
 
 ## Key Features
 
-- **Classic Lisp Syntax**: S-expressions everywhere! Supported special forms like `define`, `lambda`, `if`, `let`, `set!`, and `begin`.
-- **First-Class Functions & TCO**: Full first-class function support with tail call optimization for infinite recursion without stack overflows.
+- **Classic & Modern Special Forms**: S-expressions everywhere! Interned special forms (`define`, `defn`, `lambda`/`fn`, `match`, `match-lambda`, `if`, `cond`, `when`, `unless`, `let`, `let*`, `with`, `for`, `|>`, `->`, `delay`, `assert`, `set!`, `begin`) compile directly in the parser/compiler with zero macro-expansion overhead.
+- **First-Class Functions & TCO**: Full first-class function support with tail call optimization across conditionals, `let`, `match`, `defn`, and core list combinators (`map`, `filter`, `foldl`, `foldr`).
 - **True Metaprogramming**: A macro system (`defmacro`) with quasiquotation (`` ` ``), unquote (`~`), and unquote-splicing (`~@`).
-- **Modern Primitives**: Native support for **curly-brace record structures** (`{key value}`), multi-base numbers (`0xFF`, `0b1010`, `0o755`), thread-first pipelines (`->`), and native coroutines.
+- **Modern Primitives**: Native support for **curly-brace record structures** (`{key value}`), multi-base numbers (`0xFF`, `0b1010`, `0o755`), fast native list/string primitives (`reverse`, `append`, `last`, `range`, `drop`, `nth`), and native coroutines.
 - **Unified OS & Filesystem Interface**: All OS primitives, environment variables, time, and filesystem I/O are unified into a single interface (`system` / `sel::os::Os`) with built-in sandbox security.
 - **Dynamic FFI**: Zero-boilerplate runtime integration with standard C shared libraries using `libffi`.
 

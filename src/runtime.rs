@@ -1343,33 +1343,28 @@ pub fn macro_expand(ast: Ast, env: Rc<RefCell<Env>>) -> Result<Ast> {
                     let expanded_ast = value_to_ast(result_val, loc)?;
                     return macro_expand(expanded_ast, env);
                 }
-                if lookup(id) == "match" {
-                    let mut iter = list.into_iter().skip(1);
-                    let target = iter.next().ok_or_else(|| {
-                        SelError::SyntaxError(loc, "Expected target expression in match".into())
-                    })?;
-                    let exp_target = macro_expand(target, env.clone())?;
-                    let mut exp_list = vec![Ast::Symbol(loc, id), exp_target];
-                    for clause in iter {
-                        match clause {
-                            Ast::List(c_loc, c_items) => {
-                                if c_items.is_empty() {
-                                    exp_list.push(Ast::List(c_loc, c_items));
-                                } else {
-                                    let mut exp_clause = Vec::new();
-                                    let mut c_iter = c_items.into_iter();
-                                    // Pattern is preserved unexpanded
-                                    exp_clause.push(c_iter.next().unwrap());
-                                    for item in c_iter {
-                                        exp_clause.push(macro_expand(item, env.clone())?);
-                                    }
-                                    exp_list.push(Ast::List(c_loc, exp_clause));
-                                }
-                            }
-                            other => exp_list.push(macro_expand(other, env.clone())?),
-                        }
-                    }
-                    return Ok(Ast::List(loc, exp_list));
+                if matches!(
+                    lookup(id).as_str(),
+                    "define"
+                        | "defmacro"
+                        | "let"
+                        | "let*"
+                        | "lambda"
+                        | "fn"
+                        | "try"
+                        | "match"
+                        | "->"
+                        | "|>"
+                        | "cond"
+                        | "defn"
+                        | "match-lambda"
+                        | "with"
+                        | "for"
+                        | "delay"
+                        | "assert"
+                ) {
+                    let lowered = crate::parser::optimize_ast(list, loc)?;
+                    return macro_expand(lowered, env);
                 }
             }
 
@@ -1378,6 +1373,38 @@ pub fn macro_expand(ast: Ast, env: Rc<RefCell<Env>>) -> Result<Ast> {
                 expanded_list.push(macro_expand(item, env.clone())?);
             }
             Ok(Ast::List(loc, expanded_list))
+        }
+        Ast::Try(loc, body, err_var, catch_body) => {
+            let ebody = macro_expand(*body, env.clone())?;
+            let mut ecatch = Vec::with_capacity(catch_body.len());
+            for b in catch_body {
+                ecatch.push(macro_expand(b, env.clone())?);
+            }
+            Ok(Ast::Try(loc, Box::new(ebody), err_var, ecatch))
+        }
+        Ast::Cond(loc, branches) => {
+            let mut exp_branches = Vec::with_capacity(branches.len());
+            for (c, e) in branches {
+                exp_branches.push((macro_expand(c, env.clone())?, macro_expand(e, env.clone())?));
+            }
+            Ok(Ast::Cond(loc, exp_branches))
+        }
+        Ast::Unless(loc, cond, false_branch, true_branch) => {
+            let econd = macro_expand(*cond, env.clone())?;
+            let ef = macro_expand(*false_branch, env.clone())?;
+            let et = match true_branch {
+                Some(t) => Some(Box::new(macro_expand(*t, env)?)),
+                None => None,
+            };
+            Ok(Ast::Unless(loc, Box::new(econd), Box::new(ef), et))
+        }
+        Ast::When(loc, cond, body) => {
+            let econd = macro_expand(*cond, env.clone())?;
+            let mut exp_body = Vec::with_capacity(body.len());
+            for b in body {
+                exp_body.push(macro_expand(b, env.clone())?);
+            }
+            Ok(Ast::When(loc, Box::new(econd), exp_body))
         }
         Ast::Begin(loc, exprs) => {
             let mut exp = Vec::new();

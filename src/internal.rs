@@ -706,119 +706,39 @@ fn serialize_value(
     buf: &mut Vec<u8>,
     c_strings: &mut Vec<std::ffi::CString>,
 ) -> Result<()> {
+    macro_rules! write_num {
+        ($t:ty, $name:literal) => {{
+            let n: $t = match val {
+                Value::Integer(i) => *i as $t,
+                Value::Float(f) => *f as $t,
+                _ => {
+                    return Err(SelError::Runtime(
+                        loc,
+                        format!(
+                            "Expected integer/float for {} but got {}",
+                            $name,
+                            value_type_name(val)
+                        ),
+                    ));
+                }
+            };
+            buf.extend_from_slice(&n.to_ne_bytes());
+            Ok(())
+        }};
+    }
     match ty {
         FfiType::Void => Ok(()),
-        FfiType::I32 => {
-            let n = match val {
-                Value::Integer(i) => *i as i32,
-                Value::Float(f) => *f as i32,
-                _ => {
-                    return Err(SelError::Runtime(
-                        loc,
-                        format!(
-                            "Expected integer/float for i32 but got {}",
-                            value_type_name(val)
-                        ),
-                    ));
-                }
-            };
-            buf.extend_from_slice(&n.to_ne_bytes());
-            Ok(())
-        }
-        FfiType::I64 => {
-            let n = match val {
-                Value::Integer(i) => *i,
-                Value::Float(f) => *f as i64,
-                _ => {
-                    return Err(SelError::Runtime(
-                        loc,
-                        format!(
-                            "Expected integer/float for i64 but got {}",
-                            value_type_name(val)
-                        ),
-                    ));
-                }
-            };
-            buf.extend_from_slice(&n.to_ne_bytes());
-            Ok(())
-        }
-        FfiType::U32 => {
-            let n = match val {
-                Value::Integer(i) => *i as u32,
-                Value::Float(f) => *f as u32,
-                _ => {
-                    return Err(SelError::Runtime(
-                        loc,
-                        format!(
-                            "Expected integer/float for u32 but got {}",
-                            value_type_name(val)
-                        ),
-                    ));
-                }
-            };
-            buf.extend_from_slice(&n.to_ne_bytes());
-            Ok(())
-        }
-        FfiType::U64 => {
-            let n = match val {
-                Value::Integer(i) => *i as u64,
-                Value::Float(f) => *f as u64,
-                _ => {
-                    return Err(SelError::Runtime(
-                        loc,
-                        format!(
-                            "Expected integer/float for u64 but got {}",
-                            value_type_name(val)
-                        ),
-                    ));
-                }
-            };
-            buf.extend_from_slice(&n.to_ne_bytes());
-            Ok(())
-        }
-        FfiType::F32 => {
-            let n = match val {
-                Value::Integer(i) => *i as f32,
-                Value::Float(f) => *f as f32,
-                _ => {
-                    return Err(SelError::Runtime(
-                        loc,
-                        format!(
-                            "Expected integer/float for f32 but got {}",
-                            value_type_name(val)
-                        ),
-                    ));
-                }
-            };
-            buf.extend_from_slice(&n.to_ne_bytes());
-            Ok(())
-        }
-        FfiType::F64 => {
-            let n = match val {
-                Value::Integer(i) => *i as f64,
-                Value::Float(f) => *f,
-                _ => {
-                    return Err(SelError::Runtime(
-                        loc,
-                        format!(
-                            "Expected integer/float for f64 but got {}",
-                            value_type_name(val)
-                        ),
-                    ));
-                }
-            };
-            buf.extend_from_slice(&n.to_ne_bytes());
-            Ok(())
-        }
+        FfiType::I16 => write_num!(i16, "i16"),
+        FfiType::U16 => write_num!(u16, "u16"),
+        FfiType::I32 => write_num!(i32, "i32"),
+        FfiType::I64 => write_num!(i64, "i64"),
+        FfiType::U32 => write_num!(u32, "u32"),
+        FfiType::U64 => write_num!(u64, "u64"),
+        FfiType::F32 => write_num!(f32, "f32"),
+        FfiType::F64 => write_num!(f64, "f64"),
         FfiType::I8 => {
             let n = match val {
-                Value::Boolean(b) => {
-                    if *b {
-                        1i8
-                    } else {
-                        0i8
-                    }
-                }
+                Value::Boolean(b) => i8::from(*b),
                 Value::Integer(i) => *i as i8,
                 Value::Char(c) => *c as i8,
                 _ => {
@@ -836,13 +756,7 @@ fn serialize_value(
         }
         FfiType::Bool | FfiType::U8 => {
             let n = match val {
-                Value::Boolean(b) => {
-                    if *b {
-                        1u8
-                    } else {
-                        0u8
-                    }
-                }
+                Value::Boolean(b) => u8::from(*b),
                 Value::Integer(i) => *i as u8,
                 Value::Char(c) => *c as u8,
                 _ => {
@@ -873,40 +787,6 @@ fn serialize_value(
                 }
             };
             buf.push(n);
-            Ok(())
-        }
-        FfiType::I16 => {
-            let n = match val {
-                Value::Integer(i) => *i as i16,
-                Value::Float(f) => *f as i16,
-                _ => {
-                    return Err(SelError::Runtime(
-                        loc,
-                        format!(
-                            "Expected integer/float for i16 but got {}",
-                            value_type_name(val)
-                        ),
-                    ));
-                }
-            };
-            buf.extend_from_slice(&n.to_ne_bytes());
-            Ok(())
-        }
-        FfiType::U16 => {
-            let n = match val {
-                Value::Integer(i) => *i as u16,
-                Value::Float(f) => *f as u16,
-                _ => {
-                    return Err(SelError::Runtime(
-                        loc,
-                        format!(
-                            "Expected integer/float for u16 but got {}",
-                            value_type_name(val)
-                        ),
-                    ));
-                }
-            };
-            buf.extend_from_slice(&n.to_ne_bytes());
             Ok(())
         }
         FfiType::Pointer | FfiType::CStr => {
@@ -968,15 +848,13 @@ fn serialize_value(
             for (f_val, f_type) in list.iter().zip(fields) {
                 let (f_size, f_align) = f_type.size_and_alignment();
                 let target_offset = (current_offset + f_align - 1) & !(f_align - 1);
-                let padding = target_offset - current_offset;
-                buf.resize(buf.len() + padding, 0);
+                buf.resize(buf.len() + (target_offset - current_offset), 0);
                 serialize_value(loc, f_val, f_type, buf, c_strings)?;
                 current_offset = target_offset + f_size;
             }
             let (_, s_align) = ty.size_and_alignment();
             let total_size = (current_offset + s_align - 1) & !(s_align - 1);
-            let padding = total_size - current_offset;
-            buf.resize(buf.len() + padding, 0);
+            buf.resize(buf.len() + (total_size - current_offset), 0);
             Ok(())
         }
     }
@@ -987,54 +865,18 @@ unsafe fn deserialize_value(ty: &FfiType, ptr: *const u8) -> Value {
     unsafe {
         match ty {
             FfiType::Void => Value::Nil,
-            FfiType::I8 => {
-                let val = std::ptr::read(ptr as *const i8);
-                Value::Integer(val as i64)
-            }
-            FfiType::I16 => {
-                let val = std::ptr::read_unaligned(ptr as *const i16);
-                Value::Integer(val as i64)
-            }
-            FfiType::U16 => {
-                let val = std::ptr::read_unaligned(ptr as *const u16);
-                Value::Integer(val as i64)
-            }
-            FfiType::I32 => {
-                let val = std::ptr::read_unaligned(ptr as *const i32);
-                Value::Integer(val as i64)
-            }
-            FfiType::I64 => {
-                let val = std::ptr::read_unaligned(ptr as *const i64);
-                Value::Integer(val)
-            }
-            FfiType::U32 => {
-                let val = std::ptr::read_unaligned(ptr as *const u32);
-                Value::Integer(val as i64)
-            }
-            FfiType::U64 => {
-                let val = std::ptr::read_unaligned(ptr as *const u64);
-                Value::Integer(val as i64)
-            }
-            FfiType::F32 => {
-                let val = std::ptr::read_unaligned(ptr as *const f32);
-                Value::Float(val as f64)
-            }
-            FfiType::F64 => {
-                let val = std::ptr::read_unaligned(ptr as *const f64);
-                Value::Float(val)
-            }
-            FfiType::Bool => {
-                let val = std::ptr::read(ptr);
-                Value::Boolean(val != 0)
-            }
-            FfiType::U8 => {
-                let val = std::ptr::read(ptr);
-                Value::Integer(val as i64)
-            }
-            FfiType::Char => {
-                let val = std::ptr::read(ptr);
-                Value::Char(val as char)
-            }
+            FfiType::I8 => Value::Integer(std::ptr::read(ptr as *const i8) as i64),
+            FfiType::U8 => Value::Integer(std::ptr::read(ptr) as i64),
+            FfiType::I16 => Value::Integer(std::ptr::read_unaligned(ptr as *const i16) as i64),
+            FfiType::U16 => Value::Integer(std::ptr::read_unaligned(ptr as *const u16) as i64),
+            FfiType::I32 => Value::Integer(std::ptr::read_unaligned(ptr as *const i32) as i64),
+            FfiType::U32 => Value::Integer(std::ptr::read_unaligned(ptr as *const u32) as i64),
+            FfiType::I64 => Value::Integer(std::ptr::read_unaligned(ptr as *const i64)),
+            FfiType::U64 => Value::Integer(std::ptr::read_unaligned(ptr as *const u64) as i64),
+            FfiType::F32 => Value::Float(std::ptr::read_unaligned(ptr as *const f32) as f64),
+            FfiType::F64 => Value::Float(std::ptr::read_unaligned(ptr as *const f64)),
+            FfiType::Bool => Value::Boolean(std::ptr::read(ptr) != 0),
+            FfiType::Char => Value::Char(std::ptr::read(ptr) as char),
             FfiType::Pointer | FfiType::CStr => {
                 let val = std::ptr::read_unaligned(ptr as *const usize);
                 if val == 0 {
@@ -1049,8 +891,7 @@ unsafe fn deserialize_value(ty: &FfiType, ptr: *const u8) -> Value {
                 for f_type in fields {
                     let (f_size, f_align) = f_type.size_and_alignment();
                     let target_offset = (current_offset + f_align - 1) & !(f_align - 1);
-                    let field_ptr = ptr.add(target_offset);
-                    list.push(deserialize_value(f_type, field_ptr));
+                    list.push(deserialize_value(f_type, ptr.add(target_offset)));
                     current_offset = target_offset + f_size;
                 }
                 Value::make_list(list)
@@ -1396,6 +1237,126 @@ pub fn list(_loc: Loc, args: Vec<Value>) -> Result<Value> {
 }
 
 #[inline]
+pub fn reverse(loc: Loc, mut args: Vec<Value>) -> Result<Value> {
+    if args.len() != 1 {
+        return Err(SelError::ArityMismatch {
+            loc,
+            expected: 1,
+            actual: args.len(),
+        });
+    }
+    match args.pop().unwrap() {
+        Value::List(l) => {
+            if l.is_empty() {
+                Ok(Value::Nil)
+            } else {
+                let rev: imbl::Vector<Value> = l.iter().rev().cloned().collect();
+                Ok(Value::List(Box::new(rev)))
+            }
+        }
+        Value::String(s) => {
+            let rev: String = s.as_str().chars().rev().collect();
+            Ok(Value::make_string(&rev))
+        }
+        Value::Nil => Ok(Value::Nil),
+        v => Err(SelError::TypeError(
+            loc,
+            format!(
+                "reverse requires a list or string, got {}",
+                value_type_name(&v)
+            ),
+        )),
+    }
+}
+
+#[inline]
+pub fn append(loc: Loc, args: Vec<Value>) -> Result<Value> {
+    if args.is_empty() {
+        return Ok(Value::Nil);
+    }
+    let mut acc = imbl::Vector::new();
+    for arg in args {
+        match arg {
+            Value::List(l) => acc.append(*l),
+            Value::String(s) => {
+                for c in s.as_str().chars() {
+                    acc.push_back(Value::Char(c));
+                }
+            }
+            Value::Nil => {}
+            v => {
+                return Err(SelError::TypeError(
+                    loc,
+                    format!("append requires lists, got {}", value_type_name(&v)),
+                ));
+            }
+        }
+    }
+    if acc.is_empty() {
+        Ok(Value::Nil)
+    } else {
+        Ok(Value::List(Box::new(acc)))
+    }
+}
+
+#[inline]
+pub fn last(loc: Loc, mut args: Vec<Value>) -> Result<Value> {
+    if args.len() != 1 {
+        return Err(SelError::ArityMismatch {
+            loc,
+            expected: 1,
+            actual: args.len(),
+        });
+    }
+    match args.pop().unwrap() {
+        Value::List(l) => Ok(l.back().cloned().unwrap_or(Value::Nil)),
+        Value::String(s) => Ok(s.as_str().chars().last().map_or(Value::Nil, Value::Char)),
+        Value::Nil => Ok(Value::Nil),
+        v => Err(SelError::TypeError(
+            loc,
+            format!(
+                "last requires a list or string, got {}",
+                value_type_name(&v)
+            ),
+        )),
+    }
+}
+
+#[inline]
+pub fn range(loc: Loc, args: Vec<Value>) -> Result<Value> {
+    let (end, start, step) = match args.as_slice() {
+        [Value::Integer(end)] => (*end, 0i64, 1i64),
+        [Value::Integer(end), Value::Integer(start)] => (*end, *start, 1i64),
+        [
+            Value::Integer(end),
+            Value::Integer(start),
+            Value::Integer(step),
+        ] => {
+            if *step <= 0 {
+                return Err(SelError::Runtime(loc, "range step must be positive".into()));
+            }
+            (*end, *start, *step)
+        }
+        _ => {
+            return Err(SelError::Runtime(
+                loc,
+                "Arity/type mismatch in range: expected (range end), (range end start), or (range end start step)".into(),
+            ));
+        }
+    };
+    if start >= end {
+        return Ok(Value::Nil);
+    }
+    let mut vec = imbl::Vector::new();
+    let mut curr = start;
+    while curr < end {
+        vec.push_back(Value::Integer(curr));
+        curr += step;
+    }
+    Ok(Value::List(Box::new(vec)))
+}
+
+#[inline]
 pub fn empty(loc: Loc, mut args: Vec<Value>) -> Result<Value> {
     if args.len() != 1 {
         return Err(SelError::SyntaxError(
@@ -1540,63 +1501,42 @@ pub fn rcontains(loc: Loc, mut args: Vec<Value>) -> Result<Value> {
 }
 
 #[inline]
-pub fn is_nil(loc: Loc, mut args: Vec<Value>) -> Result<Value> {
+fn unary_pred(loc: Loc, args: Vec<Value>, name: &str, pred: fn(&Value) -> bool) -> Result<Value> {
     if args.len() != 1 {
         return Err(SelError::Runtime(
             loc,
-            "Expected exactly 1 arguments for nil?".into(),
+            format!("Expected exactly 1 arguments for {name}"),
         ));
     }
-    match args.pop().unwrap() {
-        Value::Nil => Ok(Value::Boolean(true)),
-        _ => Ok(Value::Boolean(false)),
-    }
+    Ok(Value::Boolean(pred(&args[0])))
 }
 
 #[inline]
-pub fn is_list(loc: Loc, mut args: Vec<Value>) -> Result<Value> {
-    if args.len() != 1 {
-        return Err(SelError::Runtime(
-            loc,
-            "Expected exactly 1 arguments for list?".into(),
-        ));
-    }
-    match args.pop().unwrap() {
-        Value::List(..) | Value::String(..) => Ok(Value::Boolean(true)),
-        _ => Ok(Value::Boolean(false)),
-    }
+pub fn is_nil(loc: Loc, args: Vec<Value>) -> Result<Value> {
+    unary_pred(loc, args, "nil?", |v| matches!(v, Value::Nil))
 }
 
 #[inline]
-pub fn is_number(loc: Loc, mut args: Vec<Value>) -> Result<Value> {
-    if args.len() != 1 {
-        return Err(SelError::Runtime(
-            loc,
-            "Expected exactly 1 arguments for number?".into(),
-        ));
-    }
-    match args.pop().unwrap() {
-        Value::Integer(_) => Ok(Value::Boolean(true)),
-        Value::Float(_) => Ok(Value::Boolean(true)),
-        _ => Ok(Value::Boolean(false)),
-    }
+pub fn is_list(loc: Loc, args: Vec<Value>) -> Result<Value> {
+    unary_pred(loc, args, "list?", |v| {
+        matches!(v, Value::List(..) | Value::String(..))
+    })
 }
 
 #[inline]
-pub fn is_string(loc: Loc, mut args: Vec<Value>) -> Result<Value> {
-    if args.len() != 1 {
-        return Err(SelError::Runtime(
-            loc,
-            "Expected exactly 1 arguments for string?".into(),
-        ));
-    }
-    match args.pop().unwrap() {
-        Value::String(..) => Ok(Value::Boolean(true)),
-        Value::List(l) => Ok(Value::Boolean(
-            !l.is_empty() && l.iter().all(|v| matches!(v, Value::Char(_))),
-        )),
-        _ => Ok(Value::Boolean(false)),
-    }
+pub fn is_number(loc: Loc, args: Vec<Value>) -> Result<Value> {
+    unary_pred(loc, args, "number?", |v| {
+        matches!(v, Value::Integer(_) | Value::Float(_))
+    })
+}
+
+#[inline]
+pub fn is_string(loc: Loc, args: Vec<Value>) -> Result<Value> {
+    unary_pred(loc, args, "string?", |v| match v {
+        Value::String(..) => true,
+        Value::List(l) => !l.is_empty() && l.iter().all(|x| matches!(x, Value::Char(_))),
+        _ => false,
+    })
 }
 
 #[inline]
@@ -1615,17 +1555,8 @@ pub fn string_contains(loc: Loc, args: Vec<Value>) -> Result<Value> {
 }
 
 #[inline]
-pub fn is_symbol(loc: Loc, mut args: Vec<Value>) -> Result<Value> {
-    if args.len() != 1 {
-        return Err(SelError::Runtime(
-            loc,
-            "Expected exactly 1 arguments for symbol?".into(),
-        ));
-    }
-    match args.pop().unwrap() {
-        Value::Symbol(_) => Ok(Value::Boolean(true)),
-        _ => Ok(Value::Boolean(false)),
-    }
+pub fn is_symbol(loc: Loc, args: Vec<Value>) -> Result<Value> {
+    unary_pred(loc, args, "symbol?", |v| matches!(v, Value::Symbol(_)))
 }
 
 static GENSYM_COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
@@ -1644,16 +1575,12 @@ pub fn gensym(loc: Loc, mut args: Vec<Value>) -> Result<Value> {
         let val = args.pop().unwrap();
         match val {
             Value::Symbol(id) => lookup(id),
-            v => {
-                if let Some(s) = v.to_string_lossy() {
-                    s
-                } else {
-                    return Err(SelError::Runtime(
-                        loc,
-                        format!("gensym: expected string or symbol prefix, got {v}"),
-                    ));
-                }
-            }
+            v => v.to_string_lossy().ok_or_else(|| {
+                SelError::Runtime(
+                    loc,
+                    format!("gensym: expected string or symbol prefix, got {v}"),
+                )
+            })?,
         }
     };
     let count = GENSYM_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -1661,46 +1588,23 @@ pub fn gensym(loc: Loc, mut args: Vec<Value>) -> Result<Value> {
 }
 
 #[inline]
-pub fn is_record(loc: Loc, mut args: Vec<Value>) -> Result<Value> {
-    if args.len() != 1 {
-        return Err(SelError::Runtime(
-            loc,
-            "Expected exactly 1 arguments for record?".into(),
-        ));
-    }
-    match args.pop().unwrap() {
-        Value::Record(_) => Ok(Value::Boolean(true)),
-        _ => Ok(Value::Boolean(false)),
-    }
+pub fn is_record(loc: Loc, args: Vec<Value>) -> Result<Value> {
+    unary_pred(loc, args, "record?", |v| matches!(v, Value::Record(_)))
 }
 
 #[inline]
-pub fn is_function(loc: Loc, mut args: Vec<Value>) -> Result<Value> {
-    if args.len() != 1 {
-        return Err(SelError::Runtime(
-            loc,
-            "Expected exactly 1 arguments for function?".into(),
-        ));
-    }
-    match args.pop().unwrap() {
-        Value::Closure(_) => Ok(Value::Boolean(true)),
-        Value::NativeFunction(_) => Ok(Value::Boolean(true)),
-        _ => Ok(Value::Boolean(false)),
-    }
+pub fn is_function(loc: Loc, args: Vec<Value>) -> Result<Value> {
+    unary_pred(loc, args, "function?", |v| {
+        matches!(
+            v,
+            Value::Closure(_) | Value::NativeFunction(_) | Value::NativeClosure(_)
+        )
+    })
 }
 
 #[inline]
-pub fn is_char(loc: Loc, mut args: Vec<Value>) -> Result<Value> {
-    if args.len() != 1 {
-        return Err(SelError::Runtime(
-            loc,
-            "Expected exactly 1 arguments for char?".into(),
-        ));
-    }
-    match args.pop().unwrap() {
-        Value::Char(_) => Ok(Value::Boolean(true)),
-        _ => Ok(Value::Boolean(false)),
-    }
+pub fn is_char(loc: Loc, args: Vec<Value>) -> Result<Value> {
+    unary_pred(loc, args, "char?", |v| matches!(v, Value::Char(_)))
 }
 
 #[inline]
@@ -2099,6 +2003,74 @@ pub fn co_dead_p(loc: Loc, mut args: Vec<Value>) -> Result<Value> {
 
 // Math primitives
 #[inline]
+fn num_as_f64(loc: Loc, v: &Value, fn_name: &str) -> Result<f64> {
+    match v {
+        Value::Integer(i) => Ok(*i as f64),
+        Value::Float(f) => Ok(*f),
+        _ => Err(SelError::TypeError(
+            loc,
+            format!("{fn_name}: expected number, found {}", value_type_name(v)),
+        )),
+    }
+}
+
+#[inline]
+fn unary_f64_op(loc: Loc, args: Vec<Value>, fn_name: &str, op: fn(f64) -> f64) -> Result<Value> {
+    if args.len() != 1 {
+        return Err(SelError::ArityMismatch {
+            loc,
+            expected: 1,
+            actual: args.len(),
+        });
+    }
+    Ok(Value::Float(op(num_as_f64(loc, &args[0], fn_name)?)))
+}
+
+#[inline]
+fn unary_round_op(loc: Loc, args: Vec<Value>, fn_name: &str, op: fn(f64) -> f64) -> Result<Value> {
+    if args.len() != 1 {
+        return Err(SelError::ArityMismatch {
+            loc,
+            expected: 1,
+            actual: args.len(),
+        });
+    }
+    match args[0] {
+        Value::Integer(i) => Ok(Value::Integer(i)),
+        Value::Float(f) => Ok(Value::Integer(op(f) as i64)),
+        ref v => Err(SelError::TypeError(
+            loc,
+            format!("{fn_name}: expected number, found {}", value_type_name(v)),
+        )),
+    }
+}
+
+#[inline]
+fn math_extremum(
+    loc: Loc,
+    args: Vec<Value>,
+    fn_name: &str,
+    cmp: fn(f64, f64) -> bool,
+) -> Result<Value> {
+    if args.is_empty() {
+        return Err(SelError::Runtime(
+            loc,
+            format!("{fn_name} requires at least 1 argument"),
+        ));
+    }
+    let mut best_val = args[0].clone();
+    let mut best_f = num_as_f64(loc, &best_val, fn_name)?;
+    for arg in args.into_iter().skip(1) {
+        let f = num_as_f64(loc, &arg, fn_name)?;
+        if cmp(f, best_f) {
+            best_f = f;
+            best_val = arg;
+        }
+    }
+    Ok(best_val)
+}
+
+#[inline]
 pub fn math_abs(loc: Loc, args: Vec<Value>) -> Result<Value> {
     if args.len() != 1 {
         return Err(SelError::ArityMismatch {
@@ -2119,86 +2091,12 @@ pub fn math_abs(loc: Loc, args: Vec<Value>) -> Result<Value> {
 
 #[inline]
 pub fn math_min(loc: Loc, args: Vec<Value>) -> Result<Value> {
-    if args.is_empty() {
-        return Err(SelError::Runtime(
-            loc,
-            "min requires at least 1 argument".into(),
-        ));
-    }
-    let mut min_val = args[0].clone();
-    for arg in args.into_iter().skip(1) {
-        match (&min_val, &arg) {
-            (Value::Integer(a), Value::Integer(b)) => {
-                if b < a {
-                    min_val = arg;
-                }
-            }
-            (Value::Float(a), Value::Float(b)) => {
-                if b < a {
-                    min_val = arg;
-                }
-            }
-            (Value::Integer(a), Value::Float(b)) => {
-                if *b < (*a as f64) {
-                    min_val = arg;
-                }
-            }
-            (Value::Float(a), Value::Integer(b)) => {
-                if (*b as f64) < *a {
-                    min_val = arg;
-                }
-            }
-            (_, v) => {
-                return Err(SelError::TypeError(
-                    loc,
-                    format!("min: expected number, found {}", value_type_name(v)),
-                ));
-            }
-        }
-    }
-    Ok(min_val)
+    math_extremum(loc, args, "min", |a, b| a < b)
 }
 
 #[inline]
 pub fn math_max(loc: Loc, args: Vec<Value>) -> Result<Value> {
-    if args.is_empty() {
-        return Err(SelError::Runtime(
-            loc,
-            "max requires at least 1 argument".into(),
-        ));
-    }
-    let mut max_val = args[0].clone();
-    for arg in args.into_iter().skip(1) {
-        match (&max_val, &arg) {
-            (Value::Integer(a), Value::Integer(b)) => {
-                if b > a {
-                    max_val = arg;
-                }
-            }
-            (Value::Float(a), Value::Float(b)) => {
-                if b > a {
-                    max_val = arg;
-                }
-            }
-            (Value::Integer(a), Value::Float(b)) => {
-                if *b > (*a as f64) {
-                    max_val = arg;
-                }
-            }
-            (Value::Float(a), Value::Integer(b)) => {
-                if (*b as f64) > *a {
-                    max_val = arg;
-                }
-            }
-            (_, v) => {
-                return Err(SelError::TypeError(
-                    loc,
-                    format!("max: expected number, found {}", value_type_name(v)),
-                ));
-            }
-        }
-    }
-    Ok(max_val)
+    math_extremum(loc, args, "max", |a, b| a > b)
 }
 
 #[inline]
@@ -2210,16 +2108,7 @@ pub fn math_sqrt(loc: Loc, args: Vec<Value>) -> Result<Value> {
             actual: args.len(),
         });
     }
-    let f = match args[0] {
-        Value::Integer(i) => i as f64,
-        Value::Float(f) => f,
-        ref v => {
-            return Err(SelError::TypeError(
-                loc,
-                format!("sqrt: expected number, found {}", value_type_name(v)),
-            ));
-        }
-    };
+    let f = num_as_f64(loc, &args[0], "sqrt")?;
     if f < 0.0 {
         return Err(SelError::Runtime(
             loc,
@@ -2238,234 +2127,115 @@ pub fn math_pow(loc: Loc, args: Vec<Value>) -> Result<Value> {
             actual: args.len(),
         });
     }
-    match (&args[0], &args[1]) {
-        (Value::Integer(base), Value::Integer(exp)) => {
-            if *exp >= 0
-                && *exp <= (u32::MAX as i64)
-                && let Some(res) = base.checked_pow(*exp as u32)
-            {
-                return Ok(Value::Integer(res));
-            }
-            Ok(Value::Float((*base as f64).powf(*exp as f64)))
-        }
-        (Value::Integer(base), Value::Float(exp)) => Ok(Value::Float((*base as f64).powf(*exp))),
-        (Value::Float(base), Value::Integer(exp)) => Ok(Value::Float(base.powf(*exp as f64))),
-        (Value::Float(base), Value::Float(exp)) => Ok(Value::Float(base.powf(*exp))),
-        _ => Err(SelError::TypeError(loc, "pow: expected numbers".into())),
+    if let (Value::Integer(base), Value::Integer(exp)) = (&args[0], &args[1])
+        && *exp >= 0
+        && *exp <= (u32::MAX as i64)
+        && let Some(res) = base.checked_pow(*exp as u32)
+    {
+        return Ok(Value::Integer(res));
     }
+    let base = num_as_f64(loc, &args[0], "pow")?;
+    let exp = num_as_f64(loc, &args[1], "pow")?;
+    Ok(Value::Float(base.powf(exp)))
 }
 
 #[inline]
 pub fn math_floor(loc: Loc, args: Vec<Value>) -> Result<Value> {
-    if args.len() != 1 {
-        return Err(SelError::ArityMismatch {
-            loc,
-            expected: 1,
-            actual: args.len(),
-        });
-    }
-    match args[0] {
-        Value::Integer(i) => Ok(Value::Integer(i)),
-        Value::Float(f) => Ok(Value::Integer(f.floor() as i64)),
-        ref v => Err(SelError::TypeError(
-            loc,
-            format!("floor: expected number, found {}", value_type_name(v)),
-        )),
-    }
+    unary_round_op(loc, args, "floor", f64::floor)
 }
 
 #[inline]
 pub fn math_ceil(loc: Loc, args: Vec<Value>) -> Result<Value> {
-    if args.len() != 1 {
-        return Err(SelError::ArityMismatch {
-            loc,
-            expected: 1,
-            actual: args.len(),
-        });
-    }
-    match args[0] {
-        Value::Integer(i) => Ok(Value::Integer(i)),
-        Value::Float(f) => Ok(Value::Integer(f.ceil() as i64)),
-        ref v => Err(SelError::TypeError(
-            loc,
-            format!("ceil: expected number, found {}", value_type_name(v)),
-        )),
-    }
+    unary_round_op(loc, args, "ceil", f64::ceil)
 }
 
 #[inline]
 pub fn math_round(loc: Loc, args: Vec<Value>) -> Result<Value> {
-    if args.len() != 1 {
-        return Err(SelError::ArityMismatch {
-            loc,
-            expected: 1,
-            actual: args.len(),
-        });
-    }
-    match args[0] {
-        Value::Integer(i) => Ok(Value::Integer(i)),
-        Value::Float(f) => Ok(Value::Integer(f.round() as i64)),
-        ref v => Err(SelError::TypeError(
-            loc,
-            format!("round: expected number, found {}", value_type_name(v)),
-        )),
-    }
+    unary_round_op(loc, args, "round", f64::round)
 }
 
 #[inline]
 pub fn math_sin(loc: Loc, args: Vec<Value>) -> Result<Value> {
-    if args.len() != 1 {
-        return Err(SelError::ArityMismatch {
-            loc,
-            expected: 1,
-            actual: args.len(),
-        });
-    }
-    let f = match args[0] {
-        Value::Integer(i) => i as f64,
-        Value::Float(f) => f,
-        ref v => {
-            return Err(SelError::TypeError(
-                loc,
-                format!("sin: expected number, found {}", value_type_name(v)),
-            ));
-        }
-    };
-    Ok(Value::Float(f.sin()))
+    unary_f64_op(loc, args, "sin", f64::sin)
 }
 
 #[inline]
 pub fn math_cos(loc: Loc, args: Vec<Value>) -> Result<Value> {
-    if args.len() != 1 {
-        return Err(SelError::ArityMismatch {
-            loc,
-            expected: 1,
-            actual: args.len(),
-        });
-    }
-    let f = match args[0] {
-        Value::Integer(i) => i as f64,
-        Value::Float(f) => f,
-        ref v => {
-            return Err(SelError::TypeError(
-                loc,
-                format!("cos: expected number, found {}", value_type_name(v)),
-            ));
-        }
-    };
-    Ok(Value::Float(f.cos()))
+    unary_f64_op(loc, args, "cos", f64::cos)
 }
 
 #[inline]
 pub fn math_tan(loc: Loc, args: Vec<Value>) -> Result<Value> {
-    if args.len() != 1 {
+    unary_f64_op(loc, args, "tan", f64::tan)
+}
+
+#[inline]
+fn bit_fold(loc: Loc, args: Vec<Value>, fn_name: &str, op: fn(i64, i64) -> i64) -> Result<Value> {
+    if args.is_empty() {
+        return Err(SelError::Runtime(
+            loc,
+            format!("{fn_name} requires at least 1 argument"),
+        ));
+    }
+    let mut acc = match args[0] {
+        Value::Integer(i) => i,
+        ref v => {
+            return Err(SelError::TypeError(
+                loc,
+                format!("{fn_name}: expected integer, found {}", value_type_name(v)),
+            ));
+        }
+    };
+    for arg in args.into_iter().skip(1) {
+        match arg {
+            Value::Integer(i) => acc = op(acc, i),
+            ref v => {
+                return Err(SelError::TypeError(
+                    loc,
+                    format!("{fn_name}: expected integer, found {}", value_type_name(v)),
+                ));
+            }
+        }
+    }
+    Ok(Value::Integer(acc))
+}
+
+#[inline]
+fn bit_shift(loc: Loc, args: Vec<Value>, fn_name: &str, op: fn(i64, u32) -> i64) -> Result<Value> {
+    if args.len() != 2 {
         return Err(SelError::ArityMismatch {
             loc,
-            expected: 1,
+            expected: 2,
             actual: args.len(),
         });
     }
-    let f = match args[0] {
-        Value::Integer(i) => i as f64,
-        Value::Float(f) => f,
-        ref v => {
-            return Err(SelError::TypeError(
-                loc,
-                format!("tan: expected number, found {}", value_type_name(v)),
-            ));
+    match (&args[0], &args[1]) {
+        (Value::Integer(a), Value::Integer(shift)) => {
+            if *shift < 0 || *shift >= 64 {
+                return Err(SelError::Runtime(
+                    loc,
+                    format!("{fn_name}: shift out of range: {shift}"),
+                ));
+            }
+            Ok(Value::Integer(op(*a, *shift as u32)))
         }
-    };
-    Ok(Value::Float(f.tan()))
+        _ => Err(SelError::TypeError(
+            loc,
+            format!("{fn_name}: expected integer arguments"),
+        )),
+    }
 }
 
 pub fn bit_and(loc: Loc, args: Vec<Value>) -> Result<Value> {
-    if args.is_empty() {
-        return Err(SelError::Runtime(
-            loc,
-            "bit-and requires at least 1 argument".into(),
-        ));
-    }
-    let mut acc = match args[0] {
-        Value::Integer(i) => i,
-        ref v => {
-            return Err(SelError::TypeError(
-                loc,
-                format!("bit-and: expected integer, found {}", value_type_name(v)),
-            ));
-        }
-    };
-    for arg in args.into_iter().skip(1) {
-        match arg {
-            Value::Integer(i) => acc &= i,
-            ref v => {
-                return Err(SelError::TypeError(
-                    loc,
-                    format!("bit-and: expected integer, found {}", value_type_name(v)),
-                ));
-            }
-        }
-    }
-    Ok(Value::Integer(acc))
+    bit_fold(loc, args, "bit-and", |a, b| a & b)
 }
 
 pub fn bit_or(loc: Loc, args: Vec<Value>) -> Result<Value> {
-    if args.is_empty() {
-        return Err(SelError::Runtime(
-            loc,
-            "bit-or requires at least 1 argument".into(),
-        ));
-    }
-    let mut acc = match args[0] {
-        Value::Integer(i) => i,
-        ref v => {
-            return Err(SelError::TypeError(
-                loc,
-                format!("bit-or: expected integer, found {}", value_type_name(v)),
-            ));
-        }
-    };
-    for arg in args.into_iter().skip(1) {
-        match arg {
-            Value::Integer(i) => acc |= i,
-            ref v => {
-                return Err(SelError::TypeError(
-                    loc,
-                    format!("bit-or: expected integer, found {}", value_type_name(v)),
-                ));
-            }
-        }
-    }
-    Ok(Value::Integer(acc))
+    bit_fold(loc, args, "bit-or", |a, b| a | b)
 }
 
 pub fn bit_xor(loc: Loc, args: Vec<Value>) -> Result<Value> {
-    if args.is_empty() {
-        return Err(SelError::Runtime(
-            loc,
-            "bit-xor requires at least 1 argument".into(),
-        ));
-    }
-    let mut acc = match args[0] {
-        Value::Integer(i) => i,
-        ref v => {
-            return Err(SelError::TypeError(
-                loc,
-                format!("bit-xor: expected integer, found {}", value_type_name(v)),
-            ));
-        }
-    };
-    for arg in args.into_iter().skip(1) {
-        match arg {
-            Value::Integer(i) => acc ^= i,
-            ref v => {
-                return Err(SelError::TypeError(
-                    loc,
-                    format!("bit-xor: expected integer, found {}", value_type_name(v)),
-                ));
-            }
-        }
-    }
-    Ok(Value::Integer(acc))
+    bit_fold(loc, args, "bit-xor", |a, b| a ^ b)
 }
 
 pub fn bit_not(loc: Loc, args: Vec<Value>) -> Result<Value> {
@@ -2486,53 +2256,11 @@ pub fn bit_not(loc: Loc, args: Vec<Value>) -> Result<Value> {
 }
 
 pub fn bit_shl(loc: Loc, args: Vec<Value>) -> Result<Value> {
-    if args.len() != 2 {
-        return Err(SelError::ArityMismatch {
-            loc,
-            expected: 2,
-            actual: args.len(),
-        });
-    }
-    match (&args[0], &args[1]) {
-        (Value::Integer(a), Value::Integer(shift)) => {
-            if *shift < 0 || *shift >= 64 {
-                return Err(SelError::Runtime(
-                    loc,
-                    format!("bit-shl: shift out of range: {}", shift),
-                ));
-            }
-            Ok(Value::Integer(a.wrapping_shl(*shift as u32)))
-        }
-        _ => Err(SelError::TypeError(
-            loc,
-            "bit-shl: expected integer arguments".into(),
-        )),
-    }
+    bit_shift(loc, args, "bit-shl", i64::wrapping_shl)
 }
 
 pub fn bit_shr(loc: Loc, args: Vec<Value>) -> Result<Value> {
-    if args.len() != 2 {
-        return Err(SelError::ArityMismatch {
-            loc,
-            expected: 2,
-            actual: args.len(),
-        });
-    }
-    match (&args[0], &args[1]) {
-        (Value::Integer(a), Value::Integer(shift)) => {
-            if *shift < 0 || *shift >= 64 {
-                return Err(SelError::Runtime(
-                    loc,
-                    format!("bit-shr: shift out of range: {}", shift),
-                ));
-            }
-            Ok(Value::Integer(a.wrapping_shr(*shift as u32)))
-        }
-        _ => Err(SelError::TypeError(
-            loc,
-            "bit-shr: expected integer arguments".into(),
-        )),
-    }
+    bit_shift(loc, args, "bit-shr", i64::wrapping_shr)
 }
 
 // String utilities
@@ -2883,10 +2611,16 @@ pub fn load(env: Rc<RefCell<Env>>) {
     e.insert(intern("count"), Value::NativeFunction(count));
     e.insert(intern("list"), Value::NativeFunction(list));
     e.insert(intern("empty?"), Value::NativeFunction(empty));
+    e.insert(intern("reverse"), Value::NativeFunction(reverse));
+    e.insert(intern("append"), Value::NativeFunction(append));
+    e.insert(intern("last"), Value::NativeFunction(last));
+    e.insert(intern("range"), Value::NativeFunction(range));
 
     e.insert(intern("rget"), Value::NativeFunction(rget));
     e.insert(intern("rset"), Value::NativeFunction(rset));
     e.insert(intern("rdel"), Value::NativeFunction(rdel));
+    e.insert(intern("assoc"), Value::NativeFunction(rset));
+    e.insert(intern("dissoc"), Value::NativeFunction(rdel));
     e.insert(intern("rkeys"), Value::NativeFunction(rkeys));
     e.insert(intern("rvals"), Value::NativeFunction(rvals));
     e.insert(intern("rcontains?"), Value::NativeFunction(rcontains));

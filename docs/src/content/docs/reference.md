@@ -99,20 +99,29 @@ Mutates the value bound to a symbol in the nearest visible lexical scope.
 (set! counter (+ counter 1))
 ```
 
-### let
-Introduces a local lexical binding block. Bindings inside a `let` are evaluated in parallel (they cannot see each other during initialization).
+### let & let*
+`let` introduces a parallel local lexical binding block (initializers are evaluated before any of the new bindings come into scope). `let*` evaluates bindings sequentially so each binding can reference preceding bindings in the same form.
 ```lisp
 (let ((a 10)
       (b 20))
   (+ a b)) ; Evaluates to 30
+
+(let* ((a 10)
+       (b (+ a 5)))
+  (* b 2)) ; Evaluates to 30
 ```
 
-### if
-A standard conditional branching construct. Evaluates a condition. If the condition is truthy (not `nil` and not `#f`), evaluates the `then` branch; otherwise, evaluates the optional `else` branch.
+### if, cond, when, unless
+`if` evaluates a condition; if truthy (not `nil` and not `#f`), it evaluates the `then` branch, otherwise the optional `else` branch. `cond` evaluates multi-branch `(test body...)` clauses in order, with `else` (or `:else`) as the default branch.
 ```lisp
 (if (> x 10)
     "Large"
     "Small")
+
+(cond
+  ((< x 0) "negative")
+  ((= x 0) "zero")
+  (else    "positive"))
 ```
 
 ### begin

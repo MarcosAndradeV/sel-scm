@@ -110,14 +110,9 @@ impl<'a> Compiler<'a> {
                     patches.push(self.chunk.code.len());
                     self.chunk.write((loc, OpCode::Jump(0)));
 
-                    let jump_end_idx = self.chunk.code.len();
-                    self.chunk.write((loc, OpCode::Jump(0)));
-
                     self.chunk
                         .patch_jump(jump_if_false_idx, self.chunk.code.len());
                     self.chunk.write((loc, OpCode::Pop));
-
-                    self.chunk.patch_jump(jump_end_idx, self.chunk.code.len());
                 }
                 let idx = self.chunk.add_constant(Value::Nil);
                 self.chunk.write((loc, OpCode::Constant(idx)));
@@ -264,10 +259,12 @@ impl<'a> Compiler<'a> {
             }
             Ast::Let(loc, bindings, mut body) => {
                 self.scope_depth += 1;
-                let mut ids = Vec::new();
+                let mut ids = Vec::with_capacity(bindings.len());
                 for (id, val) in bindings {
                     self.compile(val)?;
                     ids.push(id);
+                }
+                for &id in &ids {
                     self.locals.push(Local {
                         name: id,
                         depth: self.scope_depth,
